@@ -1,88 +1,93 @@
-# METIS 
+# METIS
 
-METIS is a set of serial programs for partitioning graphs, partitioning finite element meshes, 
-and producing fill reducing orderings for sparse matrices. The algorithms implemented in 
-METIS are based on the multilevel recursive-bisection, multilevel k-way, and multi-constraint 
+> **Note:** this is the [ChrdevzZ/METIS](https://github.com/ChrdevzZ/METIS) fork
+> of [KarypisLab/METIS](https://github.com/KarypisLab/METIS), with a modernized
+> CMake build and integration support. See [fork changes](FORK_CHANGES.md) for
+> the fixed upstream baseline, differences, and Unreleased history.
+
+METIS is a set of serial programs for partitioning graphs, partitioning finite element meshes,
+and producing fill reducing orderings for sparse matrices. The algorithms implemented in
+METIS are based on the multilevel recursive-bisection, multilevel k-way, and multi-constraint
 partitioning schemes developed in our lab.
 
-##  Downloading METIS
+## Requirements
 
-You can download METIS by simply cloning it using the command:
-```
-git clone https://github.com/KarypisLab/METIS.git
-```
+CMake 3.24 or newer, a C compiler capable of compiling the C99 sources, and
+a build tool supported by CMake are required. The Ninja examples below require
+Ninja on PATH. Python and Fortran are optional maintenance/consumer tools.
 
-## Building standalone METIS binaries and library
+METIS requires the modern CMake interface of [ChrdevzZ/GKlib](https://github.com/ChrdevzZ/GKlib).
+The submodule in `ext/GKlib` and the optional download select the same fixed
+fork revision. Use the initialized submodule, an explicit compatible checkout
+with `-DMETIS_GKLIB_SOURCE_DIR=/path/to/GKlib`, or its installed package.
+See [dependency preparation](docs/building.md#dependencies) before configuring.
 
-To build METIS you can follow the instructions below:
+## Download
 
-### Dependencies
-
-General dependencies for building METIS are: gcc, cmake, build-essential. 
-In Ubuntu systems these can be obtained from the apt package manager (e.g., apt-get install cmake, etc) 
-
-```
-sudo apt-get install build-essential
-sudo apt-get install cmake
+```sh
+git clone --recurse-submodules https://github.com/ChrdevzZ/METIS.git
+cd METIS
 ```
 
-In addition, you need to download and install
-[GKlib](https://github.com/KarypisLab/GKlib) by following the instructions there. 
+When publishing local changes, make the referenced GKlib commit available in
+its fork before publishing the METIS commit. Local commits alone do not make
+either repository available to remote clones.
 
+## Build and install
 
-### Building and installing METIS  
-
-METIS is primarily configured by passing options to make config. For example:
-
-```
-make config shared=1 cc=gcc prefix=~/local
-make install
-```
-
-will configure METIS to be built as a shared library using GCC and then install the binaries, header files, and libraries at 
-
-```
-~/local/bin
-~/local/include
-~/local/lib
+```sh
+cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/release --parallel 2
+ctest --test-dir build/release --output-on-failure
+cmake --install build/release --prefix /path/to/prefix
 ```
 
-directories, respectively.
+These commands build the static library and standalone tools and tests. Select
+an initialized compiler environment first. For a multi-config generator, omit
+`CMAKE_BUILD_TYPE` and pass `--config Release` to build and install, and
+`-C Release` to CTest. See the [build reference](docs/building.md).
 
-### Common configuration options are:
+Set `METIS_BUILD_SHARED_LIBS=ON` for a shared library. The `portable` and
+`optimized` presets select conservative or required IPO policies; they do not
+change the library type. See [configuration](docs/building.md#build-configuration)
+for all options and preset differences.
 
-    cc=[compiler]     - The C compiler to use [default is determined by CMake]
-    shared=1          - Build a shared library instead of a static one [off by default]
-    prefix=[PATH]     - Set the installation prefix [~/local by default]
-    gklib_path=[PATH] - Set the installation prefix where GKlib has been installed.
-                        Pass the prefix itself (e.g., ~/local), not ~/local/lib or
-                        ~/local/lib64. You can skip this if GKlib's installation prefix
-                        is the same as that of METIS.
-    i64=1             - Sets to 64 bits the width of the datatype that will store information
-                        about the vertices and their adjacency lists. 
-    r64=1             - Sets to 64 bits the width of the datatype that will store information 
-                        about floating point numbers.
+## Use in another project
 
-### Advanced debugging related options:
+Link an existing application target to an installed package:
 
-    gdb=1           - Build with support for GDB [off by default]
-    debug=1         - Enable debugging support [off by default]
-    assert=1        - Enable asserts [off by default]
-    assert2=1       - Enable very expensive asserts [off by default]
+```cmake
+find_package(METIS 5 CONFIG REQUIRED)
+target_link_libraries(my_application PRIVATE METIS::metis)
+```
 
-### Other make commands
+Set `CMAKE_PREFIX_PATH` to its installation prefix when configuring the parent
+project. Alternatively, include a source checkout:
 
-    make uninstall
-         Removes all files installed by 'make install'.
+```cmake
+add_subdirectory(ext/METIS)
+target_link_libraries(my_application PRIVATE METIS::metis)
+```
 
-    make clean
-         Removes all object files but retains the configuration options.
+Include `<metis.h>` in application code. Subdirectory builds leave programs,
+tests, and installation disabled unless requested by the parent. See
+[installation and consumption](docs/building.md#installation-and-consumption)
+for dependency, ABI, and static/shared combinations.
 
-    make distclean
-         Performs clean and completely removes the build directory.
+Windows consumers must respect CRT ownership and the external runtime needs of
+Intel-built archives. See [platforms and mixed compilers](docs/building.md#platforms-and-mixed-compilers).
 
+## Development
+
+Coding agents should read [AGENTS.md](AGENTS.md); see
+[agent setup](docs/agents.md) for client discovery and adapters.
+
+See [development checks](docs/development.md), [upstream tracking](docs/upstream.md),
+and [fork changes](FORK_CHANGES.md). Local toolchain paths and validation results
+belong in ignored build directories.
 
 ## Copyright & License Notice
+
 Copyright 1998-2020, Regents of the University of Minnesota
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at

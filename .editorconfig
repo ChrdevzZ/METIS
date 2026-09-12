@@ -1,0 +1,19 @@
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_size = 4
+
+[*.{sh,cmake,json,yml,yaml}]
+end_of_line = lf
+
+[CMakeLists.txt]
+end_of_line = lf
+
+[*.{bat,cmd}]
+end_of_line = crlf

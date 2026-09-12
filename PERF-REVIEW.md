@@ -1,12 +1,16 @@
-# METIS Runtime Performance Review — Findings & Implementation Handoff
+# Historical METIS Runtime Performance Review — Findings & Implementation Handoff
 
 **Date:** 2026-06-09
 **Scope:** Full review of `libmetis/` for runtime-performance opportunities, conducted by five
 parallel subsystem reviews (coarsening, k-way refinement, bisection/2-way FM, nested
 dissection/separators, infrastructure/build) plus measured phase timings and a CPU-sampler
 profile on the live gcc-15 build.
-**Status:** Review only — NO code changes have been made. This document is the handoff for
-whoever (human or agent) implements the optimizations.
+**Archive status:** This records the review state on 2026-06-09. The statement that no code
+changes had been made applied on that date; selected optimizations were evaluated later and
+are present in the fixed upstream baseline used by this checkout. This is not an active
+implementation checklist. See [development checks](docs/development.md#performance-validation)
+for the current build, reference, verification, case-set and output-path contract, and
+[historical results](perf/RESULTS.md) for the subsequent campaign measurements.
 
 ---
 
@@ -408,7 +412,12 @@ the implementation is wrong.
 
 ---
 
-## 7. Validation & benchmarking protocol (MANDATORY for every change)
+## 7. Historical validation and benchmarking protocol
+
+The commands and acceptance language below preserve the original campaign protocol. They
+refer to the former handwritten build entry points, source-tree reference directory and
+program layout, and must not be used as current mandatory instructions. Use the active
+[performance validation](docs/development.md#performance-validation) workflow instead.
 
 ### 7.1 Build
 
@@ -433,7 +442,7 @@ first), ≥3 repeats, report median:
 # mode-specific tiers: add -minconn, -contig, -objtype=vol runs when touching those paths
 ```
 
-### 7.3 Acceptance criteria
+### 7.3 Campaign acceptance criteria
 
 - **Tier 2 / T3.1 (bit-identical class):** output partition/iperm files MUST be byte-identical
   to the baseline build for the same seed. `cmp` the files. Any diff = implementation bug.

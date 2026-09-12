@@ -1,0 +1,66 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": {"major": 3, "minor": 24, "patch": 0},
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Portable Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}
+    },
+    {
+      "name": "debug",
+      "inherits": "default",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}
+    },
+    {
+      "name": "portable",
+      "displayName": "Portable Release",
+      "inherits": "default",
+      "cacheVariables": {
+        "METIS_IPO": "OFF",
+        "GKLIB_IPO": "OFF",
+        "METIS_NATIVE_OPTIMIZATION": false,
+        "GKLIB_NATIVE_OPTIMIZATION": false
+      }
+    },
+    {
+      "name": "optimized",
+      "displayName": "Optimized Release",
+      "inherits": "default",
+      "cacheVariables": {
+        "METIS_IPO": "ON",
+        "GKLIB_IPO": "ON",
+        "METIS_NATIVE_OPTIMIZATION": false,
+        "GKLIB_NATIVE_OPTIMIZATION": false
+      }
+    },
+    {
+      "name": "shared",
+      "inherits": "default",
+      "cacheVariables": {"METIS_BUILD_SHARED_LIBS": true}
+    },
+    {
+      "name": "wide",
+      "inherits": "default",
+      "cacheVariables": {"METIS_IDXTYPEWIDTH": "64", "METIS_REALTYPEWIDTH": "64"}
+    }
+  ],
+  "buildPresets": [
+    {"name": "default", "configurePreset": "default"},
+    {"name": "debug", "configurePreset": "debug"},
+    {"name": "portable", "configurePreset": "portable"},
+    {"name": "optimized", "configurePreset": "optimized"},
+    {"name": "shared", "configurePreset": "shared"},
+    {"name": "wide", "configurePreset": "wide"}
+  ],
+  "testPresets": [
+    {"name": "default", "configurePreset": "default", "output": {"outputOnFailure": true}},
+    {"name": "debug", "configurePreset": "debug", "output": {"outputOnFailure": true}},
+    {"name": "portable", "configurePreset": "portable", "output": {"outputOnFailure": true}},
+    {"name": "optimized", "configurePreset": "optimized", "output": {"outputOnFailure": true}},
+    {"name": "shared", "configurePreset": "shared", "output": {"outputOnFailure": true}},
+    {"name": "wide", "configurePreset": "wide", "output": {"outputOnFailure": true}}
+  ]
+}

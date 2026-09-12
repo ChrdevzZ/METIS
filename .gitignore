@@ -67,3 +67,10 @@ GKlib
 # macOS Finder droppings
 .DS_Store
 
+
+# Local CMake configuration
+CMakeUserPresets.json
+
+# Python maintenance tool caches
+__pycache__/
+*.pyc

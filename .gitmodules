@@ -1,0 +1,3 @@
+[submodule "ext/GKlib"]
+	path = ext/GKlib
+	url = https://github.com/ChrdevzZ/GKlib.git

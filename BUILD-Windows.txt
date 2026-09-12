@@ -1,52 +1,113 @@
-Building METIS requires CMake 2.8, found at
-http://www.cmake.org/. CMake generates Visual Studio project files,
-which then can be built using Visual Studio. There are two ways to
-generate visual studio files: using the command line and using the
-CMake GUI.
+Current build reference: docs/building.md
+Fixed upstream comparison and compatibility changes: FORK_CHANGES.md
 
-Using the command line
-----------------------
+Building METIS on Windows
+=========================
 
-Open the command prompt and cd to the METIS source directory. Run
+Use CMake 3.24 or newer, a compiler for the C99 sources, and the pinned
+ChrdevzZ/GKlib submodule or a compatible installed package. Select explicit
+local sources with METIS_GKLIB_SOURCE_DIR; see docs/building.md for dependency
+preparation and the publication order of the two repositories.
+Python and Fortran are optional development or interoperability tools; an
+ordinary METIS configure and build does not require either one.
 
-    > cmake --help
+Portable and optimized presets
+------------------------------
+The portable preset disables METIS and GKlib IPO and native CPU tuning. It is
+the appropriate Release baseline for output distributed to a range of
+compatible consumer toolchains:
 
-and look at the list of generators for the Visual Studio studio you
-want to build for. For example, the generator for Visual Studio 2010
-is called "Visual Studio 10".
+    cmake --preset portable
+    cmake --build --preset portable
+    ctest --preset portable
 
-After you have found the appropriate generator, run
+The optimized preset sets METIS_IPO=ON and GKLIB_IPO=ON, so both projects must
+pass their compiler-and-linker probes. Native CPU tuning remains disabled:
 
-    > .\vsgen -G "<GENERATOR>"
+    cmake --preset optimized
+    cmake --build --preset optimized
+    ctest --preset optimized
 
-to generate the project files. The project files will be placed
-build\windows.
+Neither new preset changes the static/shared library selection. AUTO does not
+proactively enable IPO for an ordinary static archive, while shared Release-like
+configurations using AUTO probe support. An explicit IPO=ON is a toolchain
+requirement and configuration fails when the probe cannot link. Keep using the
+existing default, debug, shared, and wide presets where their established
+configuration is desired.
 
-Finally, you need to manually uncomment the following two lines:
+MSVC and clang-cl
+----------------
+Initialize the selected Visual Studio developer command prompt. Select the
+specific instance/toolset when several versions are installed. With Ninja:
 
-    //#define IDXTYPEWIDTH 32
-    //#define REALTYPEWIDTH 32
+    cmake -S . -B build/msvc -G Ninja -DCMAKE_BUILD_TYPE=Release
+    cmake --build build/msvc --parallel
+    ctest --test-dir build/msvc --output-on-failure
 
-To compile METIS with 64 bit integers or 64 bit floats, you also need
-to set IDXTYPEWIDTH or REALTYPEWIDTH to 64.
+For a Visual Studio generator, pass --config Release or --config Debug to
+build, test, and install. The chosen CMake version must support that generator;
+CMake 3.24 can still use newer compilers through Ninja where supported.
 
-Using the CMake GUI
--------------------
+Select CMAKE_MSVC_RUNTIME_LIBRARY consistently for METIS, GKlib and consumers.
+Do not combine libraries built with incompatible CRT settings. Shared builds
+install runtime DLLs in bin and import libraries in lib.
 
-It is also possible to use the CMake GUI, distributed with CMake. To
-do this, open the CMake GUI, and browse to the location of METIS'
-source with the "Browse Source" button. You can also change the binary
-directory. This is where the Visual Studio project files will be
-placed. Click "Generate" to select the correct visual studio version
-and build the project files.
+Shared GKlib requires /MD or /MDd because FILE pointers and signal state cross
+its DLL interface. METIS programs also require /MD[d] when either library is
+shared: their private graph structures contain allocations owned by different
+modules. CMake checks these contracts using compile-only probes. Use static
+METIS and GKlib for /MT[d] programs. Library-only shared METIS with static GKlib
+can use /MT[d] through the public C API, with METIS_Free releasing METIS memory.
 
-Using the VS project files
---------------------------
+MSYS2
+-----
+Keep each producer build isolated to one MSYS2 environment's compiler, linker,
+headers and runtime DLLs. MINGW64 uses MSVCRT, while UCRT64 and CLANG64 use
+UCRT. An installed plain C library can cross between UCRT64 and CLANG64 when
+the architecture, C ABI, runtime ownership and external runtime dependencies
+are compatible. UCRT64 GCC uses libstdc++; CLANG64 uses libc++, so do not pass
+C++ standard-library objects across that boundary or assume IPO/object formats
+are interchangeable. Validate C and C++ consumers separately and deploy the
+producer's required runtime DLLs.
 
-The Visual Studio project will be called METIS.sln. Open it in Visual
-Studio. If the configuration is not already "Release", set it to
-"Release". Type F7 to build. The METIS library will be in
-<BINARY_DIR>\libmetis\Release and the executable programs will be in
-<BINARY_DIR>\programs\Release. (<BINARY_DIR> will be build\windows if
-you used the command line or whatever you choose if using the CMake
-GUI.)
+Intel oneAPI
+------------
+Initialize the exact installed compiler version and supported Visual Studio
+SDK environment. Driver aliases and supported CMake argument styles vary by
+oneAPI and CMake version, so confirm the compiler identity during configuration
+and use independent build directories for different drivers.
+
+The deprecated dpcpp-cl driver enables SYCL device compilation by default.
+Static GKlib's thread-local declarations are host APIs and cannot be compiled
+for that device target. Prefer icx-cl for ordinary C++. A host-only dpcpp-cl
+consumer must disable SYCL for both compilation and the final link. The project
+does not add that consumer policy through its exported targets.
+
+Intel static libraries and foreign consumers
+--------------------------------------------
+An IntelLLVM-produced static archive contains ordinary Intel runtime references
+even when IPO is disabled. A consumer using another compiler family must provide
+the matching Intel C runtime development SDK through IntelRuntime_ROOT or
+CMAKE_PREFIX_PATH. The lookup is external: METIS and GKlib do not package or
+install Intel libraries or DLLs.
+
+The lookup rejects libraries for the wrong target machine and chooses the
+MD, MDd, MT, or MTd math and vector runtime variant corresponding to the
+producer's CMAKE_MSVC_RUNTIME_LIBRARY policy. Keep object architecture, calling
+ABI, CRT selection, and METIS width settings compatible across every static
+link. In a build tree with C, C++, and Fortran consumers, link requirements are
+selected according to each final target's link language and compiler identity.
+An IntelLLVM final linker receives Intel IPO options only when that archive uses
+IPO. A foreign linker can use the external runtime libraries for ordinary
+non-IPO Intel objects, but cannot consume an Intel IPO archive.
+
+Shared libraries provide a stronger compiler boundary, but their target
+architecture and public ABI must still match the consumer. Runtime DLLs must be
+available beside the executable or through the normal Windows loader search.
+
+Incremental builds
+------------------
+Some localized MSVC installations emit UTF-8 /showIncludes output while CMake
+uses a different decoding code page. Check Ninja header dependencies when a
+header edit does not trigger rebuilding. Keep any language-specific prefix
+override in CMakeUserPresets.json rather than shared project settings.

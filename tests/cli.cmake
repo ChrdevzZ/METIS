@@ -1,0 +1,36 @@
+cmake_minimum_required(VERSION 3.24)
+
+# Give every CLI scenario isolated copies of the graph and mesh fixtures.
+file(MAKE_DIRECTORY "${WORK_DIR}")
+file(COPY "${GRAPH_DIR}/4elt.graph" "${GRAPH_DIR}/metis.mesh" DESTINATION "${WORK_DIR}")
+set(graph "${WORK_DIR}/4elt.graph")
+set(mesh "${WORK_DIR}/metis.mesh")
+
+# Keep argument selection centralized so all cases share result handling.
+if(CASE STREQUAL "graph")
+  set(command "${GC}" "${graph}")
+elseif(CASE STREQUAL "kway")
+  set(command "${GP}" -seed=12345 "${graph}" 4)
+elseif(CASE STREQUAL "rb")
+  set(command "${GP}" -seed=12345 -ptype=rb "${graph}" 4)
+elseif(CASE STREQUAL "nd")
+  set(command "${ND}" -seed=12345 "${graph}")
+elseif(CASE STREQUAL "mesh")
+  set(command "${MP}" "${mesh}" 4)
+elseif(CASE STREQUAL "dual")
+  set(command "${MG}" -gtype=dual "${mesh}")
+elseif(CASE STREQUAL "nodal")
+  set(command "${MG}" -gtype=nodal "${mesh}")
+elseif(CASE STREQUAL "fill")
+  execute_process(COMMAND "${ND}" -seed=12345 "${graph}" RESULT_VARIABLE result OUTPUT_QUIET)
+  if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Ordering failed: ${result}")
+  endif()
+  set(command "${CF}" "${graph}" "${graph}.iperm")
+endif()
+
+execute_process(COMMAND ${command} WORKING_DIRECTORY "${WORK_DIR}"
+  RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+  message(FATAL_ERROR "${CASE} failed (${result}):\n${output}\n${error}")
+endif()

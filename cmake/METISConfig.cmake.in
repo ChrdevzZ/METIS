@@ -1,0 +1,36 @@
+@PACKAGE_INIT@
+
+
+# Static packages retain the public GKlib dependency when it was not absorbed.
+include(CMakeFindDependencyMacro)
+
+
+# Native static archives retain their producer's external runtime dependency.
+# A completed shared link needs deployment DLLs, not these development libs.
+if(@METIS_CONFIG_NEEDS_INTEL_RUNTIME@)
+  function(_metis_find_intel_dependency)
+    list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
+    find_dependency(IntelRuntime MODULE)
+  endfunction()
+  _metis_find_intel_dependency()
+  if(NOT TARGET IntelRuntime::C)
+    set(METIS_FOUND FALSE)
+    set(METIS_NOT_FOUND_MESSAGE "METIS requires the external Intel C runtime; set IntelRuntime_ROOT")
+    return()
+  endif()
+endif()
+if(@METIS_CONFIG_NEEDS_GKLIB@ AND NOT TARGET GKlib::GKlib)
+  find_dependency(GKlib CONFIG)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/METISTargets.cmake")
+
+if(@METIS_CONFIG_NEEDS_INTEL_RUNTIME@)
+  intel_runtime_import(METIS::metis METIS "${CMAKE_CURRENT_LIST_DIR}")
+endif()
+
+
+# Publish ABI widths so language bindings can validate compatibility.
+set(METIS_IDXTYPEWIDTH @METIS_IDXTYPEWIDTH@)
+set(METIS_REALTYPEWIDTH @METIS_REALTYPEWIDTH@)
+check_required_components(METIS)

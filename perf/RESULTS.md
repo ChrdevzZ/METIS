@@ -1,11 +1,17 @@
-# METIS Bit-Identical Optimization Campaign — Results
+# Historical METIS Bit-Identical Optimization Campaign — Results
 
-Branch: `perf-bit-identical`. Driven by `PERF-REVIEW.md`. Every change here is **bit-identical**
-to baseline output (verified: all 10 configs `cmp`-equal to `perf/ref/` for `seed=12345`).
+This is an archive of measurements from the `perf-bit-identical` campaign driven by
+`PERF-REVIEW.md`. The measured changes were compared byte-for-byte with the campaign's
+reference outputs for `seed=12345`; the tables and machine details below remain historical
+evidence, not measurements of the current checkout. The selected optimizations are already
+part of this checkout's fixed upstream baseline. For current commands, enabled cases,
+reference manifests and output locations, see
+[performance validation](../docs/development.md#performance-validation).
 
 ## Method
-- Build: `make config cc=gcc-15 && make` (gcc-15, `-O3 -march=native`, single-threaded → deterministic).
-- Gate: `perf/harness.sh verify perf/ref` — must show `pass=11 fail=0` (byte-identical output).
+- Historical build: `make config cc=gcc-15 && make` (gcc-15, `-O3 -march=native`, single-threaded → deterministic). Current builds use CMake as described in the README.
+- Historical gate: `perf/harness.sh verify perf/ref`; the pass count had to match that
+  campaign reference manifest with `fail=0`.
 - **Two measurement modes, deliberately:**
   - **Per-phase attribution** (`perf/harness.sh bench`): uses **`-dbglvl=2`** to read METIS's
     internal phase timers (coarsen/match/contract/initpart/refine). Its purpose is *attribution*,
@@ -18,14 +24,15 @@ to baseline output (verified: all 10 configs `cmp`-equal to `perf/ref/` for `see
     timers fire per dissection node (~n/120 of them), so **the nd `-dbglvl=2` numbers are NOT valid
     timings and are used only to see which files/phase a change hits; the nd headline is dbglvl=0.**
   - **Headline speedup** (`perf/compare.sh`): runs with **NO `-dbglvl` flag, i.e. dbglvl=0**
-    (the program default, confirmed at programs/cmdline_*.c), so there is zero timer overhead.
+    (the program default, now in apps/cmdline_*.c), so there is zero timer overhead.
     This is an **interleaved A/B**: baseline binary and current binary alternated per repeat so
     machine-state drift hits both equally; min-of-N of the program's own `(METIS time)` line.
     **All headline % figures below are dbglvl=0.**
 - **Memory** (`perf/mem.sh`, dbglvl=0): METIS's gk-tracked heap high-water (`Max memory used`,
   printed even at dbglvl=0) plus OS max RSS via `/usr/bin/time -l` as a ground-truth cross-check.
 - Machine: Apple Silicon (10 cores), Darwin 25.5.0. Runs serial, machine otherwise idle.
-- Raw rows accumulate in `perf/RESULTS.tsv`.
+- Campaign raw rows accumulated in `perf/RESULTS.tsv`. The current harness writes raw rows
+  to `<METIS_BUILD_DIR>/perf/RESULTS.tsv`.
 
 ## Baseline phase breakdown (serial, min of 3, `-dbglvl=2`) — for attribution only
 

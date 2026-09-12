@@ -1,0 +1,841 @@
+{
+  "coverage": {
+    "extensions": [
+      ".c",
+      ".cc",
+      ".cpp",
+      ".cxx",
+      ".h",
+      ".hh",
+      ".hpp",
+      ".hxx",
+      ".f",
+      ".f90",
+      ".in"
+    ],
+    "local_exclude_prefixes": [
+      "ext/"
+    ],
+    "local_extensions": [
+      ".c",
+      ".cc",
+      ".cpp",
+      ".cxx",
+      ".h",
+      ".hh",
+      ".hpp",
+      ".hxx",
+      ".f",
+      ".f90",
+      ".in"
+    ],
+    "required_paths": [
+      "CMakeLists.txt",
+      "Makefile",
+      "conf/gkbuild.cmake",
+      "include/CMakeLists.txt",
+      "libmetis/CMakeLists.txt",
+      "programs/CMakeLists.txt",
+      "test/Makefile",
+      "utils/int2idxtype.sh",
+      "utils/listunescapedsymbols.csh",
+      "utils/mkdist.sh",
+      "utils/s+r.sh",
+      "vsgen.bat"
+    ],
+    "template_suffixes": [
+      ".h.in",
+      ".cmake.in"
+    ]
+  },
+  "files": [
+    {
+      "baseline_blob": "cc5c8acfe9584c69d1b52723099e57a6ffbcc903",
+      "id": "metis-cmakelists-txt",
+      "kind": "modified",
+      "local_path": "CMakeLists.txt",
+      "notes": "Tracked at the baseline path.",
+      "upstream_path": "CMakeLists.txt"
+    },
+    {
+      "baseline_blob": "e6e1e980e2b37e4afede340e3be6da69e4c6b2fc",
+      "id": "metis-conf-check-thread-storage-c",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed by the build-system migration; retained as an upstream tombstone.",
+      "upstream_path": "conf/check_thread_storage.c"
+    },
+    {
+      "baseline_blob": "20bf882b7c8a012ac3916f9a933f3ac7dc5fe2de",
+      "id": "metis-conf-gkbuild-cmake",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed by the build-system migration; retained as an upstream tombstone.",
+      "upstream_path": "conf/gkbuild.cmake"
+    },
+    {
+      "baseline_blob": "9515a51b6e5a70bc272ce62f6003aa645d2ea305",
+      "id": "metis-include-cmakelists-txt",
+      "kind": "modified",
+      "local_path": "include/CMakeLists.txt",
+      "notes": "Tracked at the baseline path.",
+      "upstream_path": "include/CMakeLists.txt"
+    },
+    {
+      "baseline_blob": "ab475fe6f943c08fe7c064eb120b6eb09261f1ff",
+      "id": "metis-include-metis-h",
+      "kind": "template",
+      "local_path": "include/metis.h.in",
+      "notes": "CMake template for the generated public metis.h header.",
+      "upstream_path": "include/metis.h"
+    },
+    {
+      "baseline_blob": "bd7b48f832edae240e5ddc37959897a792b83ba6",
+      "id": "metis-libmetis-auxapi-c",
+      "kind": "direct",
+      "local_path": "src/auxapi.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/auxapi.c"
+    },
+    {
+      "baseline_blob": "4ff70bff33a16891187672ed4fd966b4565d413b",
+      "id": "metis-libmetis-balance-c",
+      "kind": "direct",
+      "local_path": "src/balance.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/balance.c"
+    },
+    {
+      "baseline_blob": "e126d02a6323e26642f67b28947cc2634356a3c1",
+      "id": "metis-libmetis-bucketsort-c",
+      "kind": "direct",
+      "local_path": "src/bucketsort.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/bucketsort.c"
+    },
+    {
+      "baseline_blob": "b7fcfeaa917cb9e365cca13cfb925a90669d743f",
+      "id": "metis-libmetis-checkgraph-c",
+      "kind": "direct",
+      "local_path": "src/checkgraph.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/checkgraph.c"
+    },
+    {
+      "baseline_blob": "e3a329260c66e003c194dbec8889956c0b2ac735",
+      "id": "metis-libmetis-cmakelists-txt",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed by the build-system migration; src/CMakeLists.txt is local replacement build logic.",
+      "upstream_path": "libmetis/CMakeLists.txt"
+    },
+    {
+      "baseline_blob": "1fc9501b9b9d2136664a2f2f080fd8287e85bd24",
+      "id": "metis-libmetis-coarsen-c",
+      "kind": "direct",
+      "local_path": "src/coarsen.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/coarsen.c"
+    },
+    {
+      "baseline_blob": "c2e5ada4b66decaca08f22fd812b4d0169864b8a",
+      "id": "metis-libmetis-compress-c",
+      "kind": "direct",
+      "local_path": "src/compress.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/compress.c"
+    },
+    {
+      "baseline_blob": "4457234039c97cf3a72db7233b571fd378ec48b2",
+      "id": "metis-libmetis-contig-c",
+      "kind": "direct",
+      "local_path": "src/contig.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/contig.c"
+    },
+    {
+      "baseline_blob": "f09be2fd34459e0c215852086e49907cab9091cd",
+      "id": "metis-libmetis-debug-c",
+      "kind": "direct",
+      "local_path": "src/debug.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/debug.c"
+    },
+    {
+      "baseline_blob": "c18350f5f9266225a9e95ff2d0a875c9cc108ffe",
+      "id": "metis-libmetis-defs-h",
+      "kind": "direct",
+      "local_path": "src/defs.h",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/defs.h"
+    },
+    {
+      "baseline_blob": "88e900dd27ccfc17449fa279c2a813123e9581f4",
+      "id": "metis-libmetis-fm-c",
+      "kind": "direct",
+      "local_path": "src/fm.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/fm.c"
+    },
+    {
+      "baseline_blob": "fd033f0b17942dd964f56d9da676e8984aff7e84",
+      "id": "metis-libmetis-fortran-c",
+      "kind": "direct",
+      "local_path": "src/fortran.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/fortran.c"
+    },
+    {
+      "baseline_blob": "3d43c3ade0e3af3c714aa1c6d600822405f34b0b",
+      "id": "metis-libmetis-frename-c",
+      "kind": "modified",
+      "local_path": "src/frename.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/frename.c"
+    },
+    {
+      "baseline_blob": "4e17eac42c32cbb2a8877e6db2018b1984404a98",
+      "id": "metis-libmetis-gklib-c",
+      "kind": "direct",
+      "local_path": "src/gklib.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/gklib.c"
+    },
+    {
+      "baseline_blob": "dfac5ca674c5dc3a97b22e0f4879b8f6361696ae",
+      "id": "metis-libmetis-gklib-defs-h",
+      "kind": "modified",
+      "local_path": "src/gklib_defs.h",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/gklib_defs.h"
+    },
+    {
+      "baseline_blob": "78dc8b39e9dab0d915cc40a5cabde0762e6436ac",
+      "id": "metis-libmetis-gklib-rename-h",
+      "kind": "direct",
+      "local_path": "src/gklib_rename.h",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/gklib_rename.h"
+    },
+    {
+      "baseline_blob": "efb988e00f06c81a83a65361f08c68e1e1422064",
+      "id": "metis-libmetis-graph-c",
+      "kind": "direct",
+      "local_path": "src/graph.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/graph.c"
+    },
+    {
+      "baseline_blob": "04c7cb48e9aeb27e88507ea26495058ddd595206",
+      "id": "metis-libmetis-initpart-c",
+      "kind": "direct",
+      "local_path": "src/initpart.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/initpart.c"
+    },
+    {
+      "baseline_blob": "1dcb200e3ef8b3f7461f39edfe60a1093f133fb8",
+      "id": "metis-libmetis-kmetis-c",
+      "kind": "direct",
+      "local_path": "src/kmetis.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/kmetis.c"
+    },
+    {
+      "baseline_blob": "1ca83c2616fcf4773970ccbe1c1b8c7b865d9c54",
+      "id": "metis-libmetis-kwayfm-c",
+      "kind": "direct",
+      "local_path": "src/kwayfm.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/kwayfm.c"
+    },
+    {
+      "baseline_blob": "dec8b65a0c2f82664952cc4c479d5de3153148af",
+      "id": "metis-libmetis-kwayrefine-c",
+      "kind": "direct",
+      "local_path": "src/kwayrefine.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/kwayrefine.c"
+    },
+    {
+      "baseline_blob": "a4abe06caa68374fa289703b8914731a0b2da8f5",
+      "id": "metis-libmetis-macros-h",
+      "kind": "direct",
+      "local_path": "src/macros.h",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/macros.h"
+    },
+    {
+      "baseline_blob": "6e20f556a1e3d8d719f43a49214825ec3cb0dfcc",
+      "id": "metis-libmetis-mcutil-c",
+      "kind": "direct",
+      "local_path": "src/mcutil.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/mcutil.c"
+    },
+    {
+      "baseline_blob": "3c5261211232b3290b7e9aa3327e145f88482927",
+      "id": "metis-libmetis-mesh-c",
+      "kind": "direct",
+      "local_path": "src/mesh.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/mesh.c"
+    },
+    {
+      "baseline_blob": "77fd35c55f775d74f70649c8ea47ed0eff12efe1",
+      "id": "metis-libmetis-meshpart-c",
+      "kind": "direct",
+      "local_path": "src/meshpart.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/meshpart.c"
+    },
+    {
+      "baseline_blob": "dc224f4299c53c9f0ea8167d48a6b16077b12547",
+      "id": "metis-libmetis-metislib-h",
+      "kind": "modified",
+      "local_path": "src/metislib.h",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/metislib.h"
+    },
+    {
+      "baseline_blob": "7aed41e133c23b0561b1fad249f66d69f092ecef",
+      "id": "metis-libmetis-minconn-c",
+      "kind": "direct",
+      "local_path": "src/minconn.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/minconn.c"
+    },
+    {
+      "baseline_blob": "fce786474be987f6f7284c7bc6756384ff4f7900",
+      "id": "metis-libmetis-mincover-c",
+      "kind": "direct",
+      "local_path": "src/mincover.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/mincover.c"
+    },
+    {
+      "baseline_blob": "c67b06e7d8a242a322b7387df4c7686d6c976589",
+      "id": "metis-libmetis-mmd-c",
+      "kind": "direct",
+      "local_path": "src/mmd.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/mmd.c"
+    },
+    {
+      "baseline_blob": "38b1d84a1af98da4dad4ff42315e5fe18ff1db17",
+      "id": "metis-libmetis-ometis-c",
+      "kind": "direct",
+      "local_path": "src/ometis.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/ometis.c"
+    },
+    {
+      "baseline_blob": "3f846cf4ccc8027887eec78e2d65efe014b83835",
+      "id": "metis-libmetis-options-c",
+      "kind": "direct",
+      "local_path": "src/options.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/options.c"
+    },
+    {
+      "baseline_blob": "993ff0d551c8feee0744a53a992cef9221563840",
+      "id": "metis-libmetis-parmetis-c",
+      "kind": "direct",
+      "local_path": "src/parmetis.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/parmetis.c"
+    },
+    {
+      "baseline_blob": "ec49eefd75a988b7a000c1a18c38c06ba8972e12",
+      "id": "metis-libmetis-pmetis-c",
+      "kind": "direct",
+      "local_path": "src/pmetis.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/pmetis.c"
+    },
+    {
+      "baseline_blob": "d4ef595dae08db44041ce7221869b3e71495917e",
+      "id": "metis-libmetis-proto-h",
+      "kind": "modified",
+      "local_path": "src/proto.h",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/proto.h"
+    },
+    {
+      "baseline_blob": "9a9fc0e3ca83a5d24f42030429cbc8ddb3b27009",
+      "id": "metis-libmetis-refine-c",
+      "kind": "direct",
+      "local_path": "src/refine.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/refine.c"
+    },
+    {
+      "baseline_blob": "a282639f966dea1d146fbc13429e2eaaa7fd516a",
+      "id": "metis-libmetis-rename-h",
+      "kind": "direct",
+      "local_path": "src/rename.h",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/rename.h"
+    },
+    {
+      "baseline_blob": "72dae9b643a864e1405de53df4bdc817ca6c2b69",
+      "id": "metis-libmetis-separator-c",
+      "kind": "direct",
+      "local_path": "src/separator.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/separator.c"
+    },
+    {
+      "baseline_blob": "366cf012318a0197776c555a5ca11ac8d3d308c3",
+      "id": "metis-libmetis-sfm-c",
+      "kind": "direct",
+      "local_path": "src/sfm.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/sfm.c"
+    },
+    {
+      "baseline_blob": "b4ace2f788e89ac24a00c99e397beebe4bae739b",
+      "id": "metis-libmetis-srefine-c",
+      "kind": "direct",
+      "local_path": "src/srefine.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/srefine.c"
+    },
+    {
+      "baseline_blob": "6860094317cfa807fb126cf3ed9c6dfe6a8e10ea",
+      "id": "metis-libmetis-stat-c",
+      "kind": "direct",
+      "local_path": "src/stat.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/stat.c"
+    },
+    {
+      "baseline_blob": "148f88d489b32964f94e69072fd391af253ecb55",
+      "id": "metis-libmetis-stdheaders-h",
+      "kind": "direct",
+      "local_path": "src/stdheaders.h",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/stdheaders.h"
+    },
+    {
+      "baseline_blob": "0ded02da00abb01b98a9c8b567a1f8a2f7e665d7",
+      "id": "metis-libmetis-struct-h",
+      "kind": "direct",
+      "local_path": "src/struct.h",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/struct.h"
+    },
+    {
+      "baseline_blob": "9d6e05cf1c842a19f6d2572056381fc2b7dd1f8a",
+      "id": "metis-libmetis-timing-c",
+      "kind": "direct",
+      "local_path": "src/timing.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/timing.c"
+    },
+    {
+      "baseline_blob": "7fbc46726eff2668893cea4fee6c301090001c54",
+      "id": "metis-libmetis-util-c",
+      "kind": "direct",
+      "local_path": "src/util.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/util.c"
+    },
+    {
+      "baseline_blob": "e7c83cadfdde9fa21a28342e6618df4c982a4379",
+      "id": "metis-libmetis-wspace-c",
+      "kind": "direct",
+      "local_path": "src/wspace.c",
+      "notes": "Relocated from libmetis/ to src/.",
+      "upstream_path": "libmetis/wspace.c"
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-apps-cmake",
+      "kind": "local",
+      "local_path": "apps/CMakeLists.txt",
+      "notes": "Local CMake target definition replacing programs/CMakeLists.txt.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-cmake-metisconfig-cmake-in",
+      "kind": "local",
+      "local_path": "cmake/METISConfig.cmake.in",
+      "notes": "Local CMake template with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-cmake-recordinstall-cmake-in",
+      "kind": "local",
+      "local_path": "cmake/RecordInstall.cmake.in",
+      "notes": "Local CMake template with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-cmake-uninstall-cmake-in",
+      "kind": "local",
+      "local_path": "cmake/Uninstall.cmake.in",
+      "notes": "Local CMake template with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-src-cmake",
+      "kind": "local",
+      "local_path": "src/CMakeLists.txt",
+      "notes": "Local CMake target definition replacing libmetis/CMakeLists.txt.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-api-c",
+      "kind": "local",
+      "local_path": "tests/api.c",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-consumer-main-cpp",
+      "kind": "local",
+      "local_path": "tests/consumer/main.cpp",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-exports-c",
+      "kind": "local",
+      "local_path": "tests/exports.c",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-fortran-main-f90",
+      "kind": "local",
+      "local_path": "tests/fortran/main.f90",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-fortran-symbols-c",
+      "kind": "local",
+      "local_path": "tests/fortran_symbols.c",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-integration-consumer-main-c",
+      "kind": "local",
+      "local_path": "tests/integration/consumer/main.c",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-interop-main-c",
+      "kind": "local",
+      "local_path": "tests/interop/main.c",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-interop-main-cpp",
+      "kind": "local",
+      "local_path": "tests/interop/main.cpp",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-interop-main-f90",
+      "kind": "local",
+      "local_path": "tests/interop/main.f90",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-interop-metis-fortran-f90",
+      "kind": "local",
+      "local_path": "tests/interop/metis_fortran.f90",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-interop-metis-kinds-f90-in",
+      "kind": "local",
+      "local_path": "tests/interop/metis_kinds.f90.in",
+      "notes": "Local CMake template with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-package-main-c",
+      "kind": "local",
+      "local_path": "tests/package/main.c",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-package-main-cpp",
+      "kind": "local",
+      "local_path": "tests/package/main.cpp",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-probes-fixture-main-c",
+      "kind": "local",
+      "local_path": "tests/probes/fixture/main.c",
+      "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": "beb41897c185514e569ed009bed67800474805f7",
+      "id": "metis-makefile",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed by the build-system migration; retained as an upstream tombstone.",
+      "upstream_path": "Makefile"
+    },
+    {
+      "baseline_blob": "baf40ad4485efadd5aff6a5bdfb1d6e5222c424c",
+      "id": "metis-programs-cmakelists-txt",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed by the build-system migration; apps/CMakeLists.txt is local replacement build logic.",
+      "upstream_path": "programs/CMakeLists.txt"
+    },
+    {
+      "baseline_blob": "42605843914885c387de200b668e62d4e8c27573",
+      "id": "metis-programs-cmdline-gpmetis-c",
+      "kind": "direct",
+      "local_path": "apps/cmdline_gpmetis.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/cmdline_gpmetis.c"
+    },
+    {
+      "baseline_blob": "75610c364eb1edd252c75a29a3a7c3385b1ec6d4",
+      "id": "metis-programs-cmdline-m2gmetis-c",
+      "kind": "direct",
+      "local_path": "apps/cmdline_m2gmetis.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/cmdline_m2gmetis.c"
+    },
+    {
+      "baseline_blob": "99c48efa5279c5d2deef008c3a1cd8bfc80126aa",
+      "id": "metis-programs-cmdline-mpmetis-c",
+      "kind": "direct",
+      "local_path": "apps/cmdline_mpmetis.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/cmdline_mpmetis.c"
+    },
+    {
+      "baseline_blob": "a8f501c13ffa6235e49da5765634a5abb0add690",
+      "id": "metis-programs-cmdline-ndmetis-c",
+      "kind": "direct",
+      "local_path": "apps/cmdline_ndmetis.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/cmdline_ndmetis.c"
+    },
+    {
+      "baseline_blob": "e1de447d797298cbc42e3b65eb4391fe770efeb4",
+      "id": "metis-programs-cmpfillin-c",
+      "kind": "direct",
+      "local_path": "apps/cmpfillin.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/cmpfillin.c"
+    },
+    {
+      "baseline_blob": "401a817ca9126fbe4ac961aed0b8819a210d074b",
+      "id": "metis-programs-defs-h",
+      "kind": "direct",
+      "local_path": "apps/defs.h",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/defs.h"
+    },
+    {
+      "baseline_blob": "4b7e0b58a93c511cc597006f250b63606672ca12",
+      "id": "metis-programs-gpmetis-c",
+      "kind": "modified",
+      "local_path": "apps/gpmetis.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/gpmetis.c"
+    },
+    {
+      "baseline_blob": "b4b3a89f1ab8cdf6efc87a69b49d2cc4a20ed311",
+      "id": "metis-programs-graphchk-c",
+      "kind": "direct",
+      "local_path": "apps/graphchk.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/graphchk.c"
+    },
+    {
+      "baseline_blob": "1d07fd6616be313c2a36edd3a4921aecbb38d376",
+      "id": "metis-programs-io-c",
+      "kind": "modified",
+      "local_path": "apps/io.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/io.c"
+    },
+    {
+      "baseline_blob": "bb2f2b02d532a2cdf00fc75cc50e8e430b5a51f8",
+      "id": "metis-programs-m2gmetis-c",
+      "kind": "direct",
+      "local_path": "apps/m2gmetis.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/m2gmetis.c"
+    },
+    {
+      "baseline_blob": "ce9b54e09a892a5378db10e6799a215da618fbe8",
+      "id": "metis-programs-metisbin-h",
+      "kind": "modified",
+      "local_path": "apps/metisbin.h",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/metisbin.h"
+    },
+    {
+      "baseline_blob": "04a6a1b84c144f48e5f5e9e2c7189bbaad720caa",
+      "id": "metis-programs-mpmetis-c",
+      "kind": "modified",
+      "local_path": "apps/mpmetis.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/mpmetis.c"
+    },
+    {
+      "baseline_blob": "5991f0c2fdc6d0e1c4d2a20e9bf758efa58274a0",
+      "id": "metis-programs-ndmetis-c",
+      "kind": "modified",
+      "local_path": "apps/ndmetis.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/ndmetis.c"
+    },
+    {
+      "baseline_blob": "1e9e6d5f19efbddafe6f35245853a9b95164d54a",
+      "id": "metis-programs-proto-h",
+      "kind": "direct",
+      "local_path": "apps/proto.h",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/proto.h"
+    },
+    {
+      "baseline_blob": "597bb5d2a5ce9c9ee687132b4fe185629e78e44a",
+      "id": "metis-programs-smbfactor-c",
+      "kind": "direct",
+      "local_path": "apps/smbfactor.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/smbfactor.c"
+    },
+    {
+      "baseline_blob": "c0212df3c1cc01075b37dcc5d493e79d55090328",
+      "id": "metis-programs-stat-c",
+      "kind": "direct",
+      "local_path": "apps/stat.c",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/stat.c"
+    },
+    {
+      "baseline_blob": "620fc4eb037be15df2a1a5932a247fb9551496d4",
+      "id": "metis-programs-struct-h",
+      "kind": "direct",
+      "local_path": "apps/struct.h",
+      "notes": "Relocated from programs/ to apps/.",
+      "upstream_path": "programs/struct.h"
+    },
+    {
+      "baseline_blob": "2e7512bfff207087a1129e93e4e12b32f74b6b95",
+      "id": "metis-test-makefile",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed by the build-system migration; retained as an upstream tombstone.",
+      "upstream_path": "test/Makefile"
+    },
+    {
+      "baseline_blob": "d6651c34645b2fc6d577620ef605aa0cfe1781ec",
+      "id": "metis-test-mtest-c",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed by the build-system migration; retained as an upstream tombstone.",
+      "upstream_path": "test/mtest.c"
+    },
+    {
+      "baseline_blob": "6225b3faa5374f78ca1f4564172e09f7f253a54c",
+      "id": "metis-test-proto-h",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed by the build-system migration; retained as an upstream tombstone.",
+      "upstream_path": "test/proto.h"
+    },
+    {
+      "baseline_blob": "603b1d1ace074be653952a282d90578b8bc55aa1",
+      "id": "metis-utils-int2idxtype-sh",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed as an obsolete METIS 4-era source rewrite helper; retained as an upstream tombstone.",
+      "upstream_path": "utils/int2idxtype.sh"
+    },
+    {
+      "baseline_blob": "56971dfe4255ff5db2c481055c89987569e08247",
+      "id": "metis-utils-listunescapedsymbols-csh",
+      "kind": "direct",
+      "local_path": "utils/listunescapedsymbols.csh",
+      "notes": "Identity mapping for the retained internal-symbol prefix audit helper.",
+      "upstream_path": "utils/listunescapedsymbols.csh"
+    },
+    {
+      "baseline_blob": "e36f0925b5286641c1cbc0a06f61f1831fb313df",
+      "id": "metis-utils-mkdist-sh",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed by the build-system migration; retained as an upstream tombstone.",
+      "upstream_path": "utils/mkdist.sh"
+    },
+    {
+      "baseline_blob": "db8566d84fa9feb0220415091abcf89f554f0c8c",
+      "id": "metis-utils-s-r-sh",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed as a broken and unsafe in-place rewrite helper; retained as an upstream tombstone.",
+      "upstream_path": "utils/s+r.sh"
+    },
+    {
+      "baseline_blob": "e383e01558c63c68d330a17a17ae4e5ccbfd9dfc",
+      "id": "metis-vsgen-bat",
+      "kind": "removed",
+      "local_path": null,
+      "notes": "Removed by the build-system migration; retained as an upstream tombstone.",
+      "upstream_path": "vsgen.bat"
+    }
+  ],
+  "generated_headers": [
+    {
+      "generator": "CMake configure_file",
+      "notes": "Configured API widths and project version values.",
+      "output": "build/include/metis.h",
+      "template": "include/metis.h.in"
+    },
+    {
+      "generator": "CMake GenerateExportHeader",
+      "notes": "Generated export/import macros for the configured library type.",
+      "output": "build/include/metis_export.h",
+      "template": null
+    }
+  ],
+  "repository": "METIS",
+  "schema_version": 1,
+  "upstream": {
+    "baseline": "272d4a91c5f66c92327493339a476c553ebf1f5d",
+    "url": "https://github.com/KarypisLab/METIS.git"
+  }
+}

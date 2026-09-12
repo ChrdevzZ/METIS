@@ -1,0 +1,9 @@
+module metis_kinds
+  use, intrinsic :: iso_c_binding, only: c_double, c_float, c_int32_t, c_int64_t
+  implicit none
+
+  integer, parameter :: metis_idx_kind = @METIS_FORTRAN_IDX_KIND@
+  integer, parameter :: metis_real_kind = @METIS_FORTRAN_REAL_KIND@
+  integer, parameter :: metis_idx_width = @METIS_IDXTYPEWIDTH@
+  integer, parameter :: metis_real_width = @METIS_REALTYPEWIDTH@
+end module metis_kinds
