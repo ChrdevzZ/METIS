@@ -29,7 +29,6 @@ else()
 endif()
 
 find_package(METIS CONFIG REQUIRED)
-find_package(GKlib CONFIG REQUIRED)
 
 foreach(width_variable METIS_IDXTYPEWIDTH METIS_REALTYPEWIDTH)
   if(NOT DEFINED ${width_variable} OR
@@ -48,7 +47,9 @@ else()
 endif()
 
 add_executable(metis_interop ${interop_main_source})
-target_link_libraries(metis_interop PRIVATE METIS::metis GKlib::GKlib)
+# Let the installed target restore its actual dependency closure. A completed
+# self-contained shared METIS package must not require a separate GKlib SDK.
+target_link_libraries(metis_interop PRIVATE METIS::metis)
 
 if(INTEROP_MAIN_LANGUAGE STREQUAL "C")
   target_compile_features(metis_interop PRIVATE c_std_99)

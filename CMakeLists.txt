@@ -110,6 +110,26 @@ option(METIS_BUILD_DEVELOPER_TESTING "Run Python maintenance tool regressions" O
 option(METIS_BUILD_INTEGRATION_TESTING "Run build and install integration tests" OFF)
 
 
+# Native MSVC keeps its ASan runtime beside the selected target compiler.
+# Record an unambiguous existing file for build-tree programs and tests only;
+# the path is neither installed nor exported as a package requirement.
+set(_metis_native_asan_runtime_dll "")
+if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "MSVC" AND
+    ("address" IN_LIST METIS_SANITIZERS OR
+      "address" IN_LIST GKLIB_SANITIZERS))
+  get_filename_component(_metis_compiler_directory
+    "${CMAKE_C_COMPILER}" DIRECTORY)
+  file(GLOB _metis_native_asan_runtime_candidates LIST_DIRECTORIES FALSE
+    "${_metis_compiler_directory}/clang_rt.asan_dynamic-*.dll")
+  list(LENGTH _metis_native_asan_runtime_candidates
+    _metis_native_asan_runtime_count)
+  if(_metis_native_asan_runtime_count EQUAL 1)
+    list(GET _metis_native_asan_runtime_candidates 0
+      _metis_native_asan_runtime_dll)
+  endif()
+endif()
+
+
 #-------------------------------------------------------------------------------
 # TARGET CONFIGURATION
 #-------------------------------------------------------------------------------
@@ -123,9 +143,19 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MetisCheckLink.cmake")
 function(metis_copy_runtime target)
   # Runtime DLL discovery is meaningful only for Windows executable targets.
   if(WIN32)
+    set(runtime_dlls "$<TARGET_RUNTIME_DLLS:${target}>")
+    foreach(namespace METIS GKlib)
+      if(TARGET ${namespace}::ASanRuntime)
+        string(APPEND runtime_dlls
+          ";$<GENEX_EVAL:$<TARGET_PROPERTY:${namespace}::ASanRuntime,_ASAN_DLLS>>")
+      endif()
+    endforeach()
+    if(_metis_native_asan_runtime_dll)
+      string(APPEND runtime_dlls ";${_metis_native_asan_runtime_dll}")
+    endif()
     add_custom_command(TARGET ${target} POST_BUILD
       COMMAND ${CMAKE_COMMAND}
-        "-DLIBRARIES=$<TARGET_RUNTIME_DLLS:${target}>"
+        "-DLIBRARIES=${runtime_dlls}"
         "-DDESTINATION=$<TARGET_FILE_DIR:${target}>"
         -P "${PROJECT_SOURCE_DIR}/cmake/CopyRuntime.cmake"
       VERBATIM)
@@ -196,6 +226,12 @@ function(metis_target_options target)
 
   # Link probes verify that instrumentation runtimes are usable, not just parsed.
   if(METIS_GPROF)
+    # MSVC-style drivers accept some unknown switches with only a warning.
+    # They do not implement gprof's -pg contract, even with a GNU-capable backend.
+    if(CMAKE_C_COMPILER_ID STREQUAL "MSVC" OR
+        CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+      message(FATAL_ERROR "gprof instrumentation requires a driver supporting -pg; the MSVC frontend does not")
+    endif()
     cmake_push_check_state(RESET)
     set(CMAKE_REQUIRED_FLAGS "-pg")
     set(CMAKE_REQUIRED_LINK_OPTIONS "-pg")
@@ -218,17 +254,38 @@ function(metis_target_options target)
         message(FATAL_ERROR "MSVC does not support ${sanitizer}")
       endif()
       set(sanitizer_flag /fsanitize=address)
-      set(sanitizer_link_flag "")
+      # Static archives carry instrumented objects, so their final consumers
+      # also need the linker to infer the matching AddressSanitizer libraries.
+      set(sanitizer_link_flag "LINKER:/INFERASANLIBS")
     else()
       set(sanitizer_flag "-fsanitize=${sanitizer}")
       set(sanitizer_link_flag "${sanitizer_flag}")
     endif()
+    set(sanitizer_runtime "")
+    if(WIN32 AND CMAKE_C_SIMULATE_ID STREQUAL "MSVC" AND
+        CMAKE_C_COMPILER_ID MATCHES "Clang|IntelLLVM")
+      # These CMake toolchains may call link.exe/lld-link directly. Runtime
+      # libraries, not a compiler-only -fsanitize switch, form the link interface.
+      set(sanitizer_link_flag "")
+      if(sanitizer STREQUAL "address")
+        include("${PROJECT_SOURCE_DIR}/cmake/WindowsASan.cmake")
+        windows_asan_attach(${target} METIS metis_check_link)
+        set(sanitizer_runtime METIS::ASanRuntime)
+      endif()
+    endif()
     cmake_push_check_state(RESET)
     set(CMAKE_REQUIRED_FLAGS "${sanitizer_flag}")
     set(CMAKE_REQUIRED_LINK_OPTIONS "${sanitizer_link_flag}")
-    # A trivial main() may link without the sanitizer runtime. Instrument real
-    # memory and arithmetic operations so missing runtimes fail configuration.
-    metis_check_link("int main(int argc, char **argv) {
+    set(CMAKE_REQUIRED_LIBRARIES "${sanitizer_runtime}")
+    # Check the instrumentation macro as well as real memory/arithmetic code.
+    # A compiler that merely warns and ignores the switch must not pass.
+    set(sanitizer_preamble "")
+    if(sanitizer STREQUAL "address")
+      set(sanitizer_preamble "#ifndef __has_feature\n#define __has_feature(x) 0\n#endif\n#if !defined(__SANITIZE_ADDRESS__) && !__has_feature(address_sanitizer)\n#error AddressSanitizer instrumentation is not enabled\n#endif\n")
+    elseif(CMAKE_C_COMPILER_ID MATCHES "Clang|IntelLLVM")
+      set(sanitizer_preamble "#ifndef __has_feature\n#define __has_feature(x) 0\n#endif\n#if !__has_feature(undefined_behavior_sanitizer)\n#error UndefinedBehaviorSanitizer instrumentation is not enabled\n#endif\n")
+    endif()
+    metis_check_link("${sanitizer_preamble}int main(int argc, char **argv) {
       volatile int values[2] = {1, 2};
       values[argc] = argc * argc;
       return values[argc] + (argv[0] != 0);
@@ -239,7 +296,15 @@ function(metis_target_options target)
     endif()
     target_compile_options(${target} PRIVATE "${sanitizer_flag}")
     if(sanitizer_link_flag)
-      target_link_options(${target} PUBLIC "${sanitizer_link_flag}")
+      # Native MSVC resolves the ASan imports when linking a DLL. Only static
+      # archives leave that work to their consumer's final linker.
+      get_target_property(sanitizer_target_type ${target} TYPE)
+      if(CMAKE_C_COMPILER_ID STREQUAL "MSVC" AND
+          NOT sanitizer_target_type STREQUAL "STATIC_LIBRARY")
+        target_link_options(${target} PRIVATE "${sanitizer_link_flag}")
+      else()
+        target_link_options(${target} PUBLIC "${sanitizer_link_flag}")
+      endif()
     endif()
   endforeach()
 

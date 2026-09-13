@@ -6,9 +6,10 @@ if(NOT METIS_BASH_EXECUTABLE OR
     "Performance integration tests require bash; set METIS_BASH_EXECUTABLE to its executable path")
 endif()
 
+# The runner creates an ownership marker before reusing this binary directory.
 add_test(NAME metis.perf.scripts
   COMMAND "${METIS_BASH_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/run-tests.sh"
     "${PROJECT_SOURCE_DIR}"
-    "${CMAKE_CURRENT_BINARY_DIR}/work")
+    "${CMAKE_CURRENT_BINARY_DIR}/workspace")
 set_tests_properties(metis.perf.scripts PROPERTIES TIMEOUT 120)

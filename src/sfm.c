@@ -114,6 +114,8 @@ void FM_2WayNodeRefine2Sided(ctrl_t *ctrl, graph_t *graph, idx_t niter)
       other = (to+1)%2;
 
       higain = rpqGetTop(queues[to]);
+      if ((ctrl->dbglvl&METIS_DBG_MOVEINFO) && u[other] == -1)
+        g[to] = vwgt[higain]-rinfo[higain].edegrees[other];
       if (moved[higain] == -1) /* Delete if it was in the separator originally */
         rpqDelete(queues[other], higain);
 
@@ -189,8 +191,20 @@ void FM_2WayNodeRefine2Sided(ctrl_t *ctrl, graph_t *graph, idx_t niter)
       }
       mptr[nswaps+1] = nmind;
 
-      IFSET(ctrl->dbglvl, METIS_DBG_MOVEINFO,
-            printf("Moved %6"PRIDX" to %3"PRIDX", Gain: %5"PRIDX" [%5"PRIDX"] [%4"PRIDX" %4"PRIDX"] \t[%5"PRIDX" %5"PRIDX" %5"PRIDX"]\n", higain, to, g[to], g[other], vwgt[u[to]], vwgt[u[other]], pwgts[0], pwgts[1], pwgts[2]));
+      if (ctrl->dbglvl&METIS_DBG_MOVEINFO) {
+        if (u[other] == -1) {
+          printf("Moved %6"PRIDX" to %3"PRIDX", Gain: %5"PRIDX" [  N/A] "
+                 "[%4"PRIDX"  N/A] \t[%5"PRIDX" %5"PRIDX" %5"PRIDX"]\n",
+                 higain, to, g[to], vwgt[u[to]],
+                 pwgts[0], pwgts[1], pwgts[2]);
+        }
+        else {
+          printf("Moved %6"PRIDX" to %3"PRIDX", Gain: %5"PRIDX" [%5"PRIDX"] "
+                 "[%4"PRIDX" %4"PRIDX"] \t[%5"PRIDX" %5"PRIDX" %5"PRIDX"]\n",
+                 higain, to, g[to], g[other], vwgt[u[to]], vwgt[u[other]],
+                 pwgts[0], pwgts[1], pwgts[2]);
+        }
+      }
 
     }
 

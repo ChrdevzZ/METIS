@@ -49,7 +49,8 @@ an initialized compiler environment first. For a multi-config generator, omit
 
 Set `METIS_BUILD_SHARED_LIBS=ON` for a shared library. The `portable` and
 `optimized` presets select conservative or required IPO policies; they do not
-change the library type. See [configuration](docs/building.md#build-configuration)
+change the library type. IPO checks compile and link for the active configuration
+without running target programs. See [configuration](docs/building.md#build-configuration)
 for all options and preset differences.
 
 ## Use in another project
@@ -74,8 +75,11 @@ tests, and installation disabled unless requested by the parent. See
 [installation and consumption](docs/building.md#installation-and-consumption)
 for dependency, ABI, and static/shared combinations.
 
-Windows consumers must respect CRT ownership and the external runtime needs of
-Intel-built archives. See [platforms and mixed compilers](docs/building.md#platforms-and-mixed-compilers).
+Windows consumers must respect CRT ownership, external compiler runtimes for
+Intel-built archives, and ASan SDK and deployment requirements for
+sanitizer-instrumented libraries. See
+[configuration](docs/building.md#build-configuration) and
+[platforms and mixed compilers](docs/building.md#platforms-and-mixed-compilers).
 
 ## Development
 

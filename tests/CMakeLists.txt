@@ -1,11 +1,16 @@
+include("${CMAKE_CURRENT_SOURCE_DIR}/TestSupport.cmake")
+set(_metis_test_initial_cache
+  "${CMAKE_CURRENT_BINARY_DIR}/test-initial-cache.cmake")
+metis_test_write_initial_cache("${_metis_test_initial_cache}")
+
 add_executable(metis_api_test api.c)
 target_link_libraries(metis_api_test PRIVATE METIS::metis)
-add_test(NAME metis.api COMMAND metis_api_test)
+metis_test_add_runtime(NAME metis.api TARGET metis_api_test)
 set_tests_properties(metis.api PROPERTIES TIMEOUT 30)
 
 add_executable(metis_fortran_symbols fortran_symbols.c)
 target_link_libraries(metis_fortran_symbols PRIVATE METIS::metis)
-add_test(NAME metis.fortran-symbols COMMAND metis_fortran_symbols)
+metis_test_add_runtime(NAME metis.fortran-symbols TARGET metis_fortran_symbols)
 set_tests_properties(metis.fortran-symbols PROPERTIES TIMEOUT 30)
 metis_copy_runtime(metis_api_test)
 metis_copy_runtime(metis_fortran_symbols)
@@ -13,20 +18,18 @@ metis_copy_runtime(metis_fortran_symbols)
 # On Windows, verify the shared library exports the compatibility symbol list.
 if(WIN32 AND METIS_BUILD_SHARED_LIBS)
   # Keep the compatibility oracle independent of current declarations.
-  file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/export-symbols.txt" exported_symbols)
-  set(symbol_entries "")
-  foreach(symbol IN LISTS exported_symbols)
-    string(APPEND symbol_entries "  \"${symbol}\",\n")
-  endforeach()
-  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/export_symbols.h"
-    "static const char *symbols[] = {\n${symbol_entries}};\n")
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/export-symbols.txt")
+  metis_test_export_header(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/export_symbols.h"
+    SYMBOLS "${CMAKE_CURRENT_SOURCE_DIR}/export-symbols.txt"
+    SOURCE exports.c)
+
   add_executable(metis_export_test exports.c)
   target_include_directories(metis_export_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   target_link_libraries(metis_export_test PRIVATE METIS::metis)
+
   metis_copy_runtime(metis_export_test)
-  add_test(NAME metis.exports COMMAND metis_export_test $<TARGET_FILE:metis>)
+  metis_test_add_runtime(NAME metis.exports TARGET metis_export_test
+    ARGS "$<TARGET_FILE:metis>")
   set_tests_properties(metis.exports PROPERTIES TIMEOUT 30)
 endif()
 
@@ -40,20 +43,91 @@ if(METIS_BUILD_PROGRAMS)
         -DGP=$<TARGET_FILE:gpmetis> -DND=$<TARGET_FILE:ndmetis>
         -DMP=$<TARGET_FILE:mpmetis> -DMG=$<TARGET_FILE:m2gmetis>
         -DGC=$<TARGET_FILE:graphchk> -DCF=$<TARGET_FILE:cmpfillin>
+        "-DCROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+        "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cli.cmake)
     set_tests_properties(metis.${case} PROPERTIES TIMEOUT 30)
+    if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+      set_tests_properties(metis.${case} PROPERTIES
+        SKIP_REGULAR_EXPRESSION
+          "^METIS_RUNTIME_SKIPPED: no cross-compiling emulator")
+    endif()
   endforeach()
+
+  # Reject malformed target-weight records before they can update the
+  # partition-weight matrix with incomplete or out-of-range values.
+  add_test(NAME metis.tpwgts
+    COMMAND ${CMAKE_COMMAND}
+      -DGP=$<TARGET_FILE:gpmetis>
+      -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/tpwgts
+      "-DIDXTYPEWIDTH=${METIS_IDXTYPEWIDTH}"
+      "-DCROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+      "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tpwgts.cmake)
+  set_tests_properties(metis.tpwgts PROPERTIES TIMEOUT 30)
+
+  # Exercise two-sided refinement diagnostics when only one boundary queue
+  # supplies a candidate move.
+  add_test(NAME metis.moveinfo
+    COMMAND ${CMAKE_COMMAND}
+      -DND=$<TARGET_FILE:ndmetis>
+      -DGRAPH=${PROJECT_SOURCE_DIR}/graphs/mdual.graph
+      -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/moveinfo
+      "-DCROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+      "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/moveinfo.cmake)
+  set_tests_properties(metis.moveinfo PROPERTIES TIMEOUT 60)
+
+  if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+    set_tests_properties(metis.tpwgts metis.moveinfo PROPERTIES
+      SKIP_REGULAR_EXPRESSION
+        "^METIS_RUNTIME_SKIPPED: no cross-compiling emulator")
+  endif()
 endif()
 
 # Install ownership covers static and shared dependency layouts separately.
 if(METIS_BUILD_INTEGRATION_TESTING)
+  if(METIS_INSTALL)
+    set(_metis_test_native_msvc_asan FALSE)
+    if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "MSVC" AND
+        "address" IN_LIST METIS_SANITIZERS)
+      set(_metis_test_native_msvc_asan TRUE)
+    endif()
+
+    # Windows MSVC-ABI Clang and Intel LLVM targets expose an imported runtime
+    # target. Native MSVC instead asks its linker to infer the SDK libraries,
+    # so exercise its installed interface without requiring that target.
+    if(TARGET METIS::ASanRuntime OR _metis_test_native_msvc_asan)
+      add_subdirectory(sanitizers)
+    endif()
+  endif()
+
+  # Verify the toolchain-cache serialization and runtime execution boundary
+  # used by nested integration and cross-compilation fixtures.
+  add_test(NAME metis.test-support
+    COMMAND "${CMAKE_COMMAND}"
+      "-DMODULE_FILE=${CMAKE_CURRENT_SOURCE_DIR}/TestSupport.cmake"
+      -DFUNCTION_PREFIX=metis
+      "-DSKIP_MARKER=METIS_RUNTIME_SKIPPED: no cross-compiling emulator"
+      "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-support"
+      "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+      "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
+      "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+      "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test-support/verify.cmake")
+  set_tests_properties(metis.test-support PROPERTIES TIMEOUT 120)
+
   add_test(NAME metis.install-ownership
     COMMAND "${CMAKE_COMMAND}"
       "-DTEST_SOURCE_DIR=${PROJECT_SOURCE_DIR}" "-DTEST_PROJECT=METIS"
       "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/install-ownership"
       "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
       "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
       "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DTEST_INITIAL_CACHE=${_metis_test_initial_cache}"
+      "-DTEST_CONFIG=$<CONFIG>"
       "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
       "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
       "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
@@ -65,13 +139,64 @@ if(METIS_BUILD_INTEGRATION_TESTING)
       "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/shared/install-ownership"
       -DTEST_SHARED=ON
       "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
       "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
       "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DTEST_INITIAL_CACHE=${_metis_test_initial_cache}"
+      "-DTEST_CONFIG=$<CONFIG>"
       "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
       "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
       "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/install/verify.cmake")
   set_tests_properties(metis.install-ownership-shared PROPERTIES TIMEOUT 300)
+
+  # Exercise the complete static producer, relocated package, source-tree and
+  # parent-project consumer workflow that is not covered by isolated fixtures.
+  add_test(NAME metis.integration
+    COMMAND "${CMAKE_COMMAND}"
+      "-DROOT=${PROJECT_SOURCE_DIR}"
+      "-DBUILD=${CMAKE_CURRENT_BINARY_DIR}/integration"
+      "-DCONFIG=$<CONFIG>"
+      -DSHARED=OFF
+      "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
+      "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+      "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DTEST_INITIAL_CACHE=${_metis_test_initial_cache}"
+      "-DTEST_CROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+      "-DTEST_EMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/integration.cmake")
+  set_tests_properties(metis.integration PROPERTIES TIMEOUT 900)
+  if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+    set_tests_properties(metis.integration PROPERTIES
+      SKIP_REGULAR_EXPRESSION
+        "^METIS_RUNTIME_SKIPPED: no cross-compiling emulator")
+  endif()
+
+  # Dependency-provider coverage remains separate from the package workflow:
+  # it removes the bundled source before exercising offline parent overrides.
+  add_test(NAME metis.dependencies
+    COMMAND "${CMAKE_COMMAND}"
+      "-DROOT=${PROJECT_SOURCE_DIR}"
+      "-DBUILD=${CMAKE_CURRENT_BINARY_DIR}/dependencies"
+      "-DCONFIG=$<CONFIG>"
+      "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
+      "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+      "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DTEST_INITIAL_CACHE=${_metis_test_initial_cache}"
+      "-DTEST_CROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+      "-DTEST_EMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/dependencies.cmake")
+  set_tests_properties(metis.dependencies PROPERTIES
+    PROCESSORS 2
+    RUN_SERIAL TRUE
+    TIMEOUT 600)
+  if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+    set_tests_properties(metis.dependencies PROPERTIES
+      SKIP_REGULAR_EXPRESSION
+        "^METIS_RUNTIME_SKIPPED: no cross-compiling emulator")
+  endif()
 endif()
 
 # The relocated shared package must remain self-contained for C and C++ users.
@@ -81,14 +206,42 @@ if(METIS_BUILD_INTEGRATION_TESTING)
       "-DTEST_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
       "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/fresh/selfcontained-package"
       "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
       "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
       "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DTEST_INITIAL_CACHE=${_metis_test_initial_cache}"
+      "-DTEST_CONFIG=$<CONFIG>"
+      "-DTEST_CROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+      "-DTEST_EMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
       "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
       "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
       "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
       "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/package/verify.cmake")
   set_tests_properties(metis.selfcontained-package PROPERTIES TIMEOUT 300)
+  if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+    set_tests_properties(metis.selfcontained-package PROPERTIES
+      SKIP_REGULAR_EXPRESSION
+        "^METIS_RUNTIME_SKIPPED: no cross-compiling emulator")
+  endif()
+endif()
+
+# A no-op reconfigure must preserve generated headers and all dependent build
+# outputs, while a real symbol-list change must rebuild the exact dependency.
+if(METIS_BUILD_INTEGRATION_TESTING AND WIN32)
+  add_test(NAME metis.incremental-exports
+    COMMAND "${CMAKE_COMMAND}"
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/incremental"
+      "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/incremental-exports"
+      "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
+      "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+      "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DTEST_INITIAL_CACHE=${_metis_test_initial_cache}"
+      "-DMETIS_TEST_SUPPORT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/TestSupport.cmake"
+      "-DCONFIG=$<CONFIG>"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/incremental/verify.cmake")
+  set_tests_properties(metis.incremental-exports PROPERTIES TIMEOUT 300)
 endif()
 
 # Probe and shell suites are slower configure-time integration fixtures.
@@ -103,8 +256,11 @@ if(METIS_BUILD_INTEGRATION_TESTING)
     COMMAND "${CMAKE_COMMAND}"
       "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/ipo-policy-cache"
       "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
       "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
       "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DTEST_INITIAL_CACHE=${_metis_test_initial_cache}"
+      "-DTEST_CONFIG=$<CONFIG>"
       "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
       "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
       "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
@@ -119,8 +275,10 @@ if(METIS_BUILD_INTEGRATION_TESTING AND WIN32 AND
     COMMAND "${CMAKE_COMMAND}"
       "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/shared-crt-policy"
       "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
       "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
       "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DTEST_INITIAL_CACHE=${_metis_test_initial_cache}"
       "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
       "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
       "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
@@ -132,7 +290,8 @@ if(METIS_BUILD_INTEGRATION_TESTING AND WIN32 AND
 endif()
 
 
-# Maintenance regressions exercise merge behavior and runtime SDK discovery.
+# Maintenance regressions exercise merge behavior, runtime SDK discovery, and
+# bounded recovery when Windows temporarily locks a runtime copy destination.
 # Repository prose and formatting are reviewed separately from CTest.
 if(METIS_BUILD_DEVELOPER_TESTING)
   find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
@@ -143,7 +302,11 @@ if(METIS_BUILD_DEVELOPER_TESTING)
   add_test(NAME metis.intel-runtime
     COMMAND "${Python3_EXECUTABLE}" -m unittest discover
       -s "${CMAKE_CURRENT_SOURCE_DIR}/intelruntime" -p "test*.py")
-  set_tests_properties(metis.upstream-tool metis.intel-runtime PROPERTIES
-    ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1;CMAKE_COMMAND=${CMAKE_COMMAND}"
+  add_test(NAME metis.copy-runtime
+    COMMAND "${Python3_EXECUTABLE}" -m unittest discover
+      -s "${CMAKE_CURRENT_SOURCE_DIR}/copyruntime" -p "test*.py")
+  set_tests_properties(metis.upstream-tool metis.intel-runtime metis.copy-runtime
+    PROPERTIES
+    ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1;CMAKE_COMMAND=${CMAKE_COMMAND};COPY_RUNTIME_MODULE=${PROJECT_SOURCE_DIR}/cmake/CopyRuntime.cmake"
     WORKING_DIRECTORY "${PROJECT_BINARY_DIR}" TIMEOUT 120)
 endif()

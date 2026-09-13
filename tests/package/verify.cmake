@@ -34,8 +34,37 @@ function(run)
   endif()
 endfunction()
 
+function(run_tests description binary_dir)
+  if(TEST_CROSSCOMPILING AND NOT TEST_EMULATOR)
+    set_property(GLOBAL PROPERTY METIS_RUNTIME_WAS_SKIPPED TRUE)
+    return()
+  endif()
+  set(command "${CMAKE_CTEST_COMMAND}" --test-dir "${binary_dir}")
+  if(NOT config STREQUAL "")
+    list(APPEND command -C "${config}")
+  endif()
+  list(APPEND command --output-on-failure)
+  run(${command})
+endfunction()
+
 # Preserve the caller's generator, compiler and toolchain selections.
-set(args -G "${GENERATOR}" -DCMAKE_BUILD_TYPE=Release)
+if(DEFINED TEST_CONFIG)
+  set(config "${TEST_CONFIG}")
+else()
+  set(config Release)
+endif()
+set(args -G "${GENERATOR}")
+set(config_args)
+if(NOT config STREQUAL "")
+  set(config_args --config "${config}")
+endif()
+if(DEFINED TEST_INITIAL_CACHE AND NOT TEST_INITIAL_CACHE STREQUAL "")
+  list(APPEND args -C "${TEST_INITIAL_CACHE}")
+endif()
+list(APPEND args "-DCMAKE_BUILD_TYPE=${config}")
+if(DEFINED GENERATOR_INSTANCE AND NOT GENERATOR_INSTANCE STREQUAL "")
+  list(APPEND args "-DCMAKE_GENERATOR_INSTANCE=${GENERATOR_INSTANCE}")
+endif()
 foreach(variable CMAKE_MAKE_PROGRAM CMAKE_C_COMPILER CMAKE_CXX_COMPILER CMAKE_TOOLCHAIN_FILE)
   if(DEFINED ${variable} AND NOT "${${variable}}" STREQUAL "")
     list(APPEND args "-D${variable}=${${variable}}")
@@ -53,19 +82,27 @@ endforeach()
 run("${CMAKE_COMMAND}" -S "${TEST_SOURCE_DIR}/ext/GKlib" -B "${work}/gklib" ${args}
   -DGKLIB_BUILD_SHARED_LIBS=OFF -DGKLIB_INSTALL=ON -DGKLIB_BUILD_PROGRAMS=OFF
   -DGKLIB_BUILD_TESTING=OFF -DGKLIB_IPO=OFF)
-run("${CMAKE_COMMAND}" --build "${work}/gklib" --config Release --parallel 2)
-run("${CMAKE_COMMAND}" --install "${work}/gklib" --config Release --prefix "${work}/gklib-sdk")
+run("${CMAKE_COMMAND}" --build "${work}/gklib" ${config_args} --parallel 2)
+run("${CMAKE_COMMAND}" --install "${work}/gklib" ${config_args}
+  --prefix "${work}/gklib-sdk")
 run("${CMAKE_COMMAND}" -S "${TEST_SOURCE_DIR}" -B "${work}/metis" ${args}
   -DMETIS_BUILD_SHARED_LIBS=ON -DMETIS_INSTALL=ON -DMETIS_BUILD_PROGRAMS=OFF
   -DMETIS_BUILD_TESTING=OFF -DMETIS_IPO=OFF -DMETIS_GKLIB_PROVIDER=SYSTEM
   "-DCMAKE_PREFIX_PATH=${work}/gklib-sdk")
-run("${CMAKE_COMMAND}" --build "${work}/metis" --config Release --parallel 2)
-run("${CMAKE_COMMAND}" --install "${work}/metis" --config Release --prefix "${work}/installed")
+run("${CMAKE_COMMAND}" --build "${work}/metis" ${config_args} --parallel 2)
+run("${CMAKE_COMMAND}" --install "${work}/metis" ${config_args}
+  --prefix "${work}/installed")
 file(RENAME "${work}/installed" "${work}/relocated")
 
 # The relocated consumer is configured with GKlib discovery disabled.
 run("${CMAKE_COMMAND}" -S "${CMAKE_CURRENT_LIST_DIR}" -B "${work}/consumer" ${args}
   "-DCMAKE_PREFIX_PATH=${work}/relocated" -DCMAKE_DISABLE_FIND_PACKAGE_GKlib=TRUE)
-run("${CMAKE_COMMAND}" --build "${work}/consumer" --config Release --parallel 2)
-run("${CMAKE_CTEST_COMMAND}" --test-dir "${work}/consumer" -C Release --output-on-failure)
-message(STATUS "Self-contained shared METIS C/C++ package consumers passed")
+run("${CMAKE_COMMAND}" --build "${work}/consumer" ${config_args} --parallel 2)
+run_tests("relocated package consumers" "${work}/consumer")
+
+get_property(runtime_was_skipped GLOBAL PROPERTY METIS_RUNTIME_WAS_SKIPPED)
+if(runtime_was_skipped)
+  message("METIS_RUNTIME_SKIPPED: no cross-compiling emulator")
+else()
+  message(STATUS "Self-contained shared METIS C/C++ package consumers passed")
+endif()

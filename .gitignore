@@ -53,6 +53,7 @@ dkms.conf
 
 # GK things
 build/
+out/
 graphs/*.part.*
 graphs/*.iperm
 graphs/*.epart.*

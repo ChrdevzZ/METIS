@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(MetisCConsumer LANGUAGES C CXX)
+project(MetisCConsumer LANGUAGES C)
 
 # In source mode, verify METIS does not alter its parent's directory state.
 if(METIS_TEST_SOURCE)
@@ -30,7 +30,7 @@ else()
 endif()
 
 # The same executable validates the source and installed-package paths.
-add_executable(c_consumer main.c)
+add_executable(c_consumer ../../consumer/main.c)
 target_link_libraries(c_consumer PRIVATE METIS::metis)
 enable_testing()
 add_test(NAME c_consumer COMMAND c_consumer)

@@ -76,12 +76,28 @@ same settings. Programs, tests and install rules default on only at top level.
 Explicitly requested unsupported features fail configuration. OpenMP, regex,
 random-number selection and architecture fallbacks belong to GKlib.
 
+`METIS_WARNINGS_AS_ERRORS` promotes the selected compiler's project warnings
+to build errors. It is an opt-in diagnostic policy; retained upstream code can
+still produce unused-variable and numeric-conversion warnings. Keep it off for
+ordinary dependency builds, or review those diagnostics with the selected
+compiler. Configuration success does not certify a warning-free build.
+
 `METIS_IPO=AUTO` honors explicit per-configuration parent IPO settings before
 its global setting. Without parent policy, static libraries and applications do
 not enable IPO; shared Release, RelWithDebInfo and MinSizeRel probe support,
 while Debug and custom configurations remain off. `ON` requires a successful
-capability check; `OFF` disables IPO for METIS targets. Results are cached per
-project and relevant toolchain/flag signature.
+capability check; `OFF` disables IPO for METIS targets.
+
+Only configurations available in the current build are checked. Each check
+configures and links a small CMake project with that configuration's compiler,
+CRT, compile/link flags and target options. Static checks link an archive into
+a caller; shared checks link a shared library. Target programs are never run.
+Required IPO failures report a diagnostic log; default shared AUTO disables
+only the configuration whose check failed. Results are cached in this build
+tree per project, configuration, link type and effective input signature. An
+unchanged reconfigure reuses the result and log. Disabled IPO needs no probe.
+This checks the selected toolchain and options, not arbitrary dependency graphs
+or another compiler's IPO object format.
 
 The Ninja presets are `default` (Release), `debug`, `shared` (Release shared),
 `wide` (Release 64/64), `portable` and `optimized`. The latter two are Release
@@ -93,6 +109,42 @@ METIS preset. Keep machine paths in untracked `CMakeUserPresets.json`.
 Native tuning is opt-in and unavailable for cross-compilation or universal
 multi-architecture builds. Quote sanitizer lists such as
 `-DMETIS_SANITIZERS="address;undefined"` so the shell passes one CMake argument.
+
+Sanitizer checks require actual instrumentation and its final-link runtime.
+An ignored compiler switch is not support. Native MSVC supports AddressSanitizer
+only; clang-cl and Intel LLVM are checked separately. MSVC-style frontends do
+not implement gprof's `-pg` interface and reject `METIS_GPROF=ON`.
+
+Compile-and-link feature checks use an executable and the active configuration,
+including configuration-specific flags and the selected custom linker. Common
+diagnostics for ignored or unsupported options make a requested capability fail
+even when the compiler exits successfully. Each check restores its temporary
+state and caches a result only for the complete effective input signature.
+
+For Windows MSVC-ABI Clang and Intel LLVM ASan, the build records the runtime
+libraries selected by the compiler for the effective architecture and CRT.
+Static installation consumers recover those libraries through their compiler
+SDK, `CompilerRuntime_ROOT` or `CMAKE_PREFIX_PATH`; no producer SDK paths are
+exported. Use a compatible producer runtime SDK, including its DLLs. A
+completed shared library requires runtime deployment, not the static development
+SDK. Sanitized archives have
+additional runtime constraints beyond the ordinary C ABI.
+
+ASan final links using LLD disable string tail merging to avoid overlapping
+instrumented globals, following the [LLVM workaround](https://github.com/llvm/llvm-project/pull/74207).
+The link interface follows the final language and target
+linker selection, including explicit `LINKER_TYPE` overrides; ordinary
+`link.exe` links do not receive LLD-only switches. Intel Windows IPO links use
+the Intel driver and its LLD path. This workaround does not change ordinary
+unsanitized builds or make IPO archives portable between compiler toolchains.
+
+Build-tree tools and tests copy the selected ASan DLL beside their executables.
+On Windows, a bounded retry handles a short permission or sharing conflict
+during that copy; missing inputs and persistent failures remain fatal.
+Installed packages do not redistribute compiler runtimes. Deploy compatible
+ASan and other required runtime DLLs explicitly; an unrelated SDK on `PATH`
+must not be used as a substitute. Debug CRT support is checked for the actual
+compiler configuration and is not assumed from Release ASan support.
 
 For MSVC AddressSanitizer builds, prefer `RelWithDebInfo`: without debug
 information MSVC emits [C5072](https://learn.microsoft.com/en-us/cpp/error-messages/compiler-warnings/compiler-warning-c5072?view=msvc-170).
@@ -231,12 +283,22 @@ remain supported for static libraries and applications. A library-only shared
 METIS with static GKlib can use a static CRT; callers must use `METIS_Free` for
 memory returned by METIS and must not use its private application interfaces.
 
-One build tree can select different compilers for C, C++ and Fortran in the
-parent project. Different C compilers for GKlib and METIS require separate
-producer builds and installed packages; `add_subdirectory()` does not choose
-a second C compiler. Do not assume LLVM-based IPO formats are interchangeable.
-Fortran callers can use the existing wrappers or interoperable `BIND(C)` calls;
-private compiler module files are not a portable exchange interface.
+A parent project can select compilers separately for languages that CMake's
+platform modules allow together. On Windows, CMake 3.24 and 4.3 reject
+mixing MSVC with Clang or another CL-compatible compiler ID across C and C++
+during language initialization; this is a CMake toolchain restriction, not a
+finding that ordinary ABI-compatible objects cannot interoperate. This project
+does not bypass that platform check. C and compatible Fortran compilers can
+still be selected independently.
+
+Different C compilers for GKlib and METIS require separate producer builds and
+installed packages; `add_subdirectory()` does not choose a second C compiler.
+Do not assume LLVM-based IPO formats are interchangeable. Fortran callers can
+use the existing wrappers or interoperable `BIND(C)` calls; private compiler
+module files are not a portable exchange interface. See the corresponding
+[CMake 3.24](https://gitlab.kitware.com/cmake/cmake/-/blob/v3.24.0/Modules/Platform/Windows-Clang.cmake#L151-166)
+and [CMake 4.3](https://gitlab.kitware.com/cmake/cmake/-/blob/v4.3.0/Modules/Platform/Windows-Clang.cmake#L180-202)
+platform checks.
 
 Keep each MSYS2 producer build inside one environment. MINGW64 uses MSVCRT;
 UCRT64 and CLANG64 both use UCRT, so compatible installed C-library consumption
@@ -247,6 +309,11 @@ and IPO/object compatibility must be established separately.
 See [Windows toolchains](../BUILD-Windows.txt) and
 [Fortran examples](../tests/interop/README.md). Cross-compilation tests must not
 run target executables without a suitable runtime or emulator.
+
+The installed-package fixture uses the package's integer and real widths for
+both direct C calls and the original underscore wrappers. It links only the
+public METIS target, allowing its package configuration to restore any required
+dependencies instead of unconditionally requiring a separate GKlib package.
 
 ## Tests and maintenance
 
@@ -268,6 +335,29 @@ python tools/upstream.py check
 Review changed source style against the recorded upstream files without bulk
 reformatting. See [development checks](development.md) for maintenance commands,
 test coverage and toolchain limitations.
+
+Nested build tests inherit a bounded set of toolchain, architecture, CRT and
+compiler/linker settings through a generated initial cache. They use the active
+CTest configuration; scenarios that deliberately select another configuration
+state it explicitly. The cache does not enable additional project languages.
+
+Runtime tests execute native programs directly. Cross-compiled programs run
+only through `CMAKE_CROSSCOMPILING_EMULATOR`, including its argument list. Without
+an emulator, configuration, compilation and linking are still checked, while
+runtime checks are reported as skipped. A skipped run is not execution evidence,
+and earlier build failures remain failures.
+
+Windows ASan fixtures cover configuration selection, configless records, failed
+lookup and retry behavior, external SDK resolution, and LLD versus `link.exe`
+final-link selection. A separate fixture enables its C++ final-link language
+only after embedding the sanitized C library.
+
+API tests validate graph symmetry, independently recompute partition edge cuts
+and compare mesh adjacency sets without requiring one neighbor order. The export
+regression checks both unchanged reconfiguration and automatic regeneration when
+the independent symbol baseline changes. Program regressions reject overflowing
+or inverted target-weight ranges, non-finite values and trailing input, and
+exercise MOVEINFO diagnostics when only one queue has a move candidate.
 
 `upstream/files.json` records every source/header relationship to the official
 upstream revision, including moved files, generated-header templates, and

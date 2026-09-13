@@ -268,6 +268,26 @@ mesh_t *ReadMesh(params_t *params)
 }
 
 
+static idx_t ReadTPwgtsInteger(char *string, char **endptr)
+{
+  int64_t value;
+
+  errno = 0;
+#if defined(COMPILER_MSC)
+  value = _strtoi64(string, endptr, 10);
+#else
+  value = strtoll(string, endptr, 10);
+#endif
+
+#if IDXTYPEWIDTH == 32
+  if (value < INT32_MIN || value > INT32_MAX)
+    errno = ERANGE;
+#endif
+
+  return (idx_t)value;
+}
+
+
 /*************************************************************************/
 /*! This function reads in the target partition weights. If no file is 
     specified the weights are set to 1/nparts */
@@ -302,14 +322,15 @@ void ReadTPwgts(params_t *params, idx_t ncon)
     curstr = line;
     newstr = NULL;
 
-    from = strtoidx(curstr, &newstr, 10);
-    if (newstr == curstr)
+    from = ReadTPwgtsInteger(curstr, &newstr);
+    if (newstr == curstr || errno == ERANGE)
       errexit("The 'from' component of line <%s> in the tpwgts file is incorrect.\n", line);
     curstr = newstr;
 
     if (curstr[0] == '-') {
-      to = strtoidx(curstr+1, &newstr, 10);
-      if (newstr == curstr)
+      curstr++;
+      to = ReadTPwgtsInteger(curstr, &newstr);
+      if (newstr == curstr || errno == ERANGE)
         errexit("The 'to' component of line <%s> in the tpwgts file is incorrect.\n", line);
       curstr = newstr;
     }
@@ -318,14 +339,16 @@ void ReadTPwgts(params_t *params, idx_t ncon)
     }
 
     if (curstr[0] == ':') {
-      fromcnum = strtoidx(curstr+1, &newstr, 10);
-      if (newstr == curstr)
+      curstr++;
+      fromcnum = ReadTPwgtsInteger(curstr, &newstr);
+      if (newstr == curstr || errno == ERANGE)
         errexit("The 'fromcnum' component of line <%s> in the tpwgts file is incorrect.\n", line);
       curstr = newstr;
 
       if (curstr[0] == '-') {
-        tocnum = strtoidx(curstr+1, &newstr, 10);
-        if (newstr == curstr)
+        curstr++;
+        tocnum = ReadTPwgtsInteger(curstr, &newstr);
+        if (newstr == curstr || errno == ERANGE)
           errexit("The 'tocnum' component of line <%s> in the tpwgts file is incorrect.\n", line);
         curstr = newstr;
       }
@@ -339,8 +362,10 @@ void ReadTPwgts(params_t *params, idx_t ncon)
     }
 
     if (curstr[0] == '=') {
-      awgt = strtoreal(curstr+1, &newstr);
-      if (newstr == curstr)
+      curstr++;
+      errno = 0;
+      awgt = strtoreal(curstr, &newstr);
+      if (newstr == curstr || errno == ERANGE)
         errexit("The 'wgt' component of line <%s> in the tpwgts file is incorrect.\n", line);
       curstr = newstr;
     }
@@ -348,15 +373,22 @@ void ReadTPwgts(params_t *params, idx_t ncon)
       errexit("The 'wgt' component of line <%s> in the tpwgts file is missing.\n", line);
     }
 
+    while (isspace((unsigned char)curstr[0]))
+      curstr++;
+    if (curstr[0] != '\0')
+      errexit("The tpwgts line <%s> contains trailing characters.\n", line);
+
     /*printf("Read: %"PRIDX"-%"PRIDX":%"PRIDX"-%"PRIDX"=%"PRREAL"\n",
         from, to, fromcnum, tocnum, awgt);*/
 
-    if (from < 0 || to < 0 || from >= params->nparts || to >= params->nparts)
+    if (from < 0 || to < 0 || from > to ||
+        from >= params->nparts || to >= params->nparts)
       errexit("Invalid partition range for %"PRIDX":%"PRIDX"\n", from, to);
-    if (fromcnum < 0 || tocnum < 0 || fromcnum >= ncon || tocnum >= ncon)
+    if (fromcnum < 0 || tocnum < 0 || fromcnum > tocnum ||
+        fromcnum >= ncon || tocnum >= ncon)
       errexit("Invalid constraint number range for %"PRIDX":%"PRIDX"\n", 
           fromcnum, tocnum);
-    if (awgt <= 0.0 || awgt >= 1.0)
+    if (!isfinite(awgt) || awgt <= 0.0 || awgt >= 1.0)
       errexit("Invalid partition weight of %"PRREAL"\n", awgt);
     for (i=from; i<=to; i++) {
       for (j=fromcnum; j<=tocnum; j++)

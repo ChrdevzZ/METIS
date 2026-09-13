@@ -11,6 +11,12 @@ endif()
 
 # Export the public target and its package metadata as development artifacts.
 set(metis_cmakedir "${CMAKE_INSTALL_LIBDIR}/cmake/METIS")
+set(METIS_CONFIG_NEEDS_ASAN OFF)
+if(TARGET METIS::ASanRuntime AND NOT METIS_BUILD_SHARED_LIBS)
+  set(METIS_CONFIG_NEEDS_ASAN ON)
+  windows_asan_install(METIS "${metis_cmakedir}" METIS_Development)
+endif()
+
 configure_package_config_file(cmake/METISConfig.cmake.in
   "${PROJECT_BINARY_DIR}/METISConfig.cmake" INSTALL_DESTINATION "${metis_cmakedir}")
 write_basic_package_version_file("${PROJECT_BINARY_DIR}/METISConfigVersion.cmake"

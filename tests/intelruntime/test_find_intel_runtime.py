@@ -91,6 +91,8 @@ class FindIntelRuntimeTests(unittest.TestCase):
             "-DRESULT_FILE=" + str(result),
             "-DTARGET_ARCH=x64",
             "-DTARGET_POINTER_SIZE=8",
+            "-DCMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH=FALSE",
+            "-DCMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH=FALSE",
         ]
         for key, value in definitions.items():
             args.append("-D{}={}".format(key, value))

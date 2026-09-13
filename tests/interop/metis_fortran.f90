@@ -15,6 +15,12 @@ module metis_fortran_interop
       integer(metis_idx_kind) :: options(*)
     end function metis_set_default_options
 
+    integer(c_int) function metis_legacy_options(options) &
+        bind(C, name="metis_setdefaultoptions_")
+      import :: c_int, metis_idx_kind
+      integer(metis_idx_kind) :: options(*)
+    end function metis_legacy_options
+
     integer(c_int) function metis_part_graph_kway(nvtxs, ncon, xadj, &
         adjncy, vwgt, vsize, adjwgt, nparts, tpwgts, ubvec, options, &
         edgecut, part) bind(C, name="METIS_PartGraphKway")
@@ -41,6 +47,14 @@ module metis_fortran_interop
       integer(metis_idx_kind) :: options(*), perm(*), iperm(*)
     end function metis_node_nd
 
+    integer(c_int) function metis_legacy_node_nd(nvtxs, xadj, adjncy, &
+        vwgt, options, perm, iperm) bind(C, name="metis_nodend_")
+      import :: c_int, metis_idx_kind
+      integer(metis_idx_kind) :: nvtxs
+      integer(metis_idx_kind) :: xadj(*), adjncy(*), vwgt(*)
+      integer(metis_idx_kind) :: options(*), perm(*), iperm(*)
+    end function metis_legacy_node_nd
+
     integer(c_int) function metis_free(memory) bind(C, name="METIS_Free")
       import :: c_int, c_ptr
       type(c_ptr), value :: memory
@@ -60,7 +74,7 @@ contains
     integer(metis_idx_kind) :: eptr(3), eind(6)
     integer(metis_idx_kind), pointer :: mesh_xadj_values(:)
     type(c_ptr) :: mesh_xadj, mesh_adjncy
-    integer(c_int) :: status, xadj_status, adjncy_status
+    integer(c_int) :: status, xadj_status, adjncy_status, wrapper
 
     interop_fortran_test = 0_c_int
     if (storage_size(nvtxs) /= metis_idx_width .or. &
@@ -104,17 +118,41 @@ contains
       interop_fortran_test = 15_c_int
       return
     end if
-    status = metis_node_nd(nvtxs, xadj, adjncy, vwgt, options, perm, iperm)
-    if (status /= 1_c_int) then
-      interop_fortran_test = 16_c_int
-      return
-    end if
-    do i = 1, nvtxs
-      if (perm(i) < 0 .or. perm(i) >= nvtxs .or. &
-          iperm(perm(i) + 1) /= i - 1) then
-        interop_fortran_test = 17_c_int
+
+    ! Exercise the C entry points and the original underscore wrappers with
+    ! the installed index kind, including 64-bit packages.
+    do wrapper = 0, 1
+      if (wrapper == 0) then
+        status = metis_set_default_options(options)
+      else
+        status = metis_legacy_options(options)
+      end if
+      if (status /= 1_c_int) then
+        interop_fortran_test = 12_c_int
         return
       end if
+      if (wrapper == 0) then
+        status = metis_node_nd(nvtxs, xadj, adjncy, vwgt, options, perm, iperm)
+      else
+        status = metis_legacy_node_nd(nvtxs, xadj, adjncy, vwgt, &
+            options, perm, iperm)
+      end if
+      if (status /= 1_c_int) then
+        interop_fortran_test = 16_c_int
+        return
+      end if
+      do i = 1, nvtxs
+        ! Fortran does not require short-circuit evaluation of .or.; validate
+        ! the range before using a returned permutation as an array index.
+        if (perm(i) < 0 .or. perm(i) >= nvtxs) then
+          interop_fortran_test = 17_c_int
+          return
+        end if
+        if (iperm(perm(i) + 1) /= i - 1) then
+          interop_fortran_test = 17_c_int
+          return
+        end if
+      end do
     end do
 
     ne = 2

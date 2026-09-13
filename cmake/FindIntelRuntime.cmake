@@ -16,9 +16,16 @@ function(_intelruntime_detect_crt result)
   cmake_push_check_state(RESET)
   set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "")
-  set(configs __DEFAULT Debug Release RelWithDebInfo MinSizeRel
-    ${CMAKE_CONFIGURATION_TYPES} ${CMAKE_BUILD_TYPE})
-  list(REMOVE_DUPLICATES configs)
+  if(CMAKE_CONFIGURATION_TYPES)
+    set(configs ${CMAKE_CONFIGURATION_TYPES})
+    list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
+      CMAKE_CONFIGURATION_TYPES)
+    list(REMOVE_DUPLICATES CMAKE_TRY_COMPILE_PLATFORM_VARIABLES)
+  elseif(CMAKE_BUILD_TYPE)
+    set(configs "${CMAKE_BUILD_TYPE}")
+  else()
+    set(configs __DEFAULT)
+  endif()
   set(expression "")
   foreach(config IN LISTS configs)
     if(config STREQUAL "__DEFAULT")
@@ -28,7 +35,7 @@ function(_intelruntime_detect_crt result)
     set(CMAKE_TRY_COMPILE_CONFIGURATION "${config}")
     set(CMAKE_BUILD_TYPE "${config}")
     string(SHA256 signature
-      "${CMAKE_VERSION};${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_VERSION};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_${upper}};${config};${CMAKE_TOOLCHAIN_FILE};$ENV{CL};$ENV{_CL_};$ENV{INCLUDE}")
+      "${CMAKE_VERSION};${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_VERSION};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_${upper}};${config};${CMAKE_CONFIGURATION_TYPES};${CMAKE_TOOLCHAIN_FILE};$ENV{CL};$ENV{_CL_};$ENV{INCLUDE}")
     set(selected "")
     foreach(mode MD MDd MT MTd)
       if(mode MATCHES "^MD")
@@ -185,6 +192,12 @@ function(intel_runtime_import target package directory)
       set(intel_driver "$<OR:$<LINK_LANG_AND_ID:C,IntelLLVM>,$<LINK_LANG_AND_ID:CXX,IntelLLVM>,$<LINK_LANG_AND_ID:Fortran,IntelLLVM>>")
       list(APPEND options
         "$<$<AND:$<STREQUAL:$<UPPER_CASE:$<CONFIG>>,${upper}>,${intel_driver}>:-Qipo>")
+      # This driver mode selects LLD rather than the ordinary Windows linker.
+      # ASan instrumented IPO archives must retain the matching workaround.
+      if(TARGET ${package}::ASanRuntime)
+        list(APPEND options
+          "$<$<AND:$<STREQUAL:$<UPPER_CASE:$<CONFIG>>,${upper}>,${intel_driver}>:LINKER:/OPT:NOLLDTAILMERGE>")
+      endif()
     endif()
   endforeach()
 

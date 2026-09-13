@@ -340,9 +340,9 @@
     {
       "baseline_blob": "993ff0d551c8feee0744a53a992cef9221563840",
       "id": "metis-libmetis-parmetis-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/parmetis.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; MOVEINFO diagnostics avoid a missing opposite candidate and preserve the selected gain before queue updates. Node-refinement balance differences use width-matched iabs instead of narrowing through C int.",
       "upstream_path": "libmetis/parmetis.c"
     },
     {
@@ -388,9 +388,9 @@
     {
       "baseline_blob": "366cf012318a0197776c555a5ca11ac8d3d308c3",
       "id": "metis-libmetis-sfm-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/sfm.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; MOVEINFO diagnostics avoid a missing opposite candidate and preserve the selected gain before queue updates.",
       "upstream_path": "libmetis/sfm.c"
     },
     {
@@ -494,7 +494,7 @@
       "id": "metis-local-tests-api-c",
       "kind": "local",
       "local_path": "tests/api.c",
-      "notes": "Local source with no baseline upstream counterpart.",
+      "notes": "Local API, width, partition, mesh, permutation, error, and allocation-ownership regression fixture.",
       "upstream_path": null
     },
     {
@@ -515,14 +515,6 @@
     },
     {
       "baseline_blob": null,
-      "id": "metis-local-tests-fortran-main-f90",
-      "kind": "local",
-      "local_path": "tests/fortran/main.f90",
-      "notes": "Local source with no baseline upstream counterpart.",
-      "upstream_path": null
-    },
-    {
-      "baseline_blob": null,
       "id": "metis-local-tests-fortran-symbols-c",
       "kind": "local",
       "local_path": "tests/fortran_symbols.c",
@@ -531,10 +523,18 @@
     },
     {
       "baseline_blob": null,
+      "id": "metis-local-tests-incremental-exports-c",
+      "kind": "local",
+      "local_path": "tests/incremental/exports.c",
+      "notes": "Local fixture for stable generated export headers and dependency-driven rebuilds.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
       "id": "metis-local-tests-integration-consumer-main-c",
       "kind": "local",
-      "local_path": "tests/integration/consumer/main.c",
-      "notes": "Local source with no baseline upstream counterpart.",
+      "local_path": "tests/consumer/main.c",
+      "notes": "Shared minimal installed-package, source-provider and sanitizer consumer fixture.",
       "upstream_path": null
     },
     {
@@ -579,26 +579,26 @@
     },
     {
       "baseline_blob": null,
-      "id": "metis-local-tests-package-main-c",
-      "kind": "local",
-      "local_path": "tests/package/main.c",
-      "notes": "Local source with no baseline upstream counterpart.",
-      "upstream_path": null
-    },
-    {
-      "baseline_blob": null,
-      "id": "metis-local-tests-package-main-cpp",
-      "kind": "local",
-      "local_path": "tests/package/main.cpp",
-      "notes": "Local source with no baseline upstream counterpart.",
-      "upstream_path": null
-    },
-    {
-      "baseline_blob": null,
       "id": "metis-local-tests-probes-fixture-main-c",
       "kind": "local",
       "local_path": "tests/probes/fixture/main.c",
       "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-sanitizers-consumer-main-cpp",
+      "kind": "local",
+      "local_path": "tests/consumer/smoke.cpp",
+      "notes": "Shared minimal installed-package, source-provider and sanitizer consumer fixture.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-sanitizers-late-language-main-cpp",
+      "kind": "local",
+      "local_path": "tests/sanitizers/late-language/main.cpp",
+      "notes": "Local C++ consumer that enables its final-link language after embedding the ASan-instrumented C library.",
       "upstream_path": null
     },
     {
@@ -670,7 +670,7 @@
       "id": "metis-programs-gpmetis-c",
       "kind": "modified",
       "local_path": "apps/gpmetis.c",
-      "notes": "Relocated from programs/ to apps/.",
+      "notes": "Relocated from programs/ to apps/. Preserve non-Apple Unix resource usage while restricting /proc reporting to Linux and excluding Windows.",
       "upstream_path": "programs/gpmetis.c"
     },
     {
@@ -686,7 +686,7 @@
       "id": "metis-programs-io-c",
       "kind": "modified",
       "local_path": "apps/io.c",
-      "notes": "Relocated from programs/ to apps/.",
+      "notes": "Relocated from programs/ to apps/; sizes output names from their inputs and validates full-width target-weight ranges and values without accepting trailing input.",
       "upstream_path": "programs/io.c"
     },
     {
@@ -710,7 +710,7 @@
       "id": "metis-programs-mpmetis-c",
       "kind": "modified",
       "local_path": "apps/mpmetis.c",
-      "notes": "Relocated from programs/ to apps/.",
+      "notes": "Relocated from programs/ to apps/. Preserve non-Apple Unix resource usage while restricting /proc reporting to Linux and excluding Windows.",
       "upstream_path": "programs/mpmetis.c"
     },
     {
@@ -718,7 +718,7 @@
       "id": "metis-programs-ndmetis-c",
       "kind": "modified",
       "local_path": "apps/ndmetis.c",
-      "notes": "Relocated from programs/ to apps/.",
+      "notes": "Relocated from programs/ to apps/. Preserve non-Apple Unix resource usage while restricting /proc reporting to Linux and excluding Windows.",
       "upstream_path": "programs/ndmetis.c"
     },
     {
@@ -740,9 +740,9 @@
     {
       "baseline_blob": "c0212df3c1cc01075b37dcc5d493e79d55090328",
       "id": "metis-programs-stat-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "apps/stat.c",
-      "notes": "Relocated from programs/ to apps/.",
+      "notes": "Relocated from programs/ to apps/; corrects the file documentation name.",
       "upstream_path": "programs/stat.c"
     },
     {
@@ -766,7 +766,7 @@
       "id": "metis-test-mtest-c",
       "kind": "removed",
       "local_path": null,
-      "notes": "Removed by the build-system migration; retained as an upstream tombstone.",
+      "notes": "Removed obsolete METIS 4 API test: its entry points and signatures do not match the public METIS 5.2.1 interface at the accepted baseline.",
       "upstream_path": "test/mtest.c"
     },
     {

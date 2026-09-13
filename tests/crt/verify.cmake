@@ -22,6 +22,13 @@ set(configure_command
   "${CMAKE_COMMAND}"
   -S "${CMAKE_CURRENT_LIST_DIR}"
   -G "${GENERATOR}")
+if(DEFINED TEST_INITIAL_CACHE AND NOT TEST_INITIAL_CACHE STREQUAL "")
+  list(APPEND configure_command -C "${TEST_INITIAL_CACHE}")
+endif()
+if(GENERATOR_INSTANCE)
+  list(APPEND configure_command
+    "-DCMAKE_GENERATOR_INSTANCE=${GENERATOR_INSTANCE}")
+endif()
 if(GENERATOR_PLATFORM)
   list(APPEND configure_command -A "${GENERATOR_PLATFORM}")
 endif()

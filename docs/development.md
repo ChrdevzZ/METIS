@@ -8,6 +8,9 @@ upstream source, compatibility changes and Unreleased history see
 Ordinary builds require CMake 3.24 and a supported C compiler. GKlib tests also
 use C++11. Python 3.9 and Git are required only when developer testing is enabled.
 Fortran is needed only for the optional installed-package consumer fixture.
+The same width-adaptive fixture exercises direct C entry points and the
+original underscore wrappers. The C symbol test invokes all four NodeND
+spellings; the export inventory covers every wrapper symbol.
 Use `METIS_BUILD_TESTING`, `METIS_BUILD_INTEGRATION_TESTING`, and
 `METIS_BUILD_DEVELOPER_TESTING` together for the full development suite.
 
@@ -25,7 +28,35 @@ Review changed declarations, comments and macro layout against the mapped
 upstream source. Keep the existing style without bulk reformatting. There
 are no text-presence or documentation-layout gates in CTest. To exercise
 the documented installation workflows, enable integration testing and run
-the installation and consumer tests directly through CTest.
+the installation and consumer tests directly through CTest. The dependency-provider
+fixture also runs through the opt-in integration suite, covering missing
+sources, offline overrides and parent FetchContent declarations.
+
+Program-specific regressions cover strict target-weight parsing and the
+MOVEINFO-only single-candidate diagnostic paths. They require the corresponding
+METIS programs; a library-only suite does not register those command tests.
+
+The performance-script fixture owns a marked directory below the test binary
+tree. Direct invocations must use a new directory or one already marked by the
+fixture; existing unmarked directories, symlinks and source ancestors are
+rejected before cleanup. POSIX systems do not require the MSYS2 `cygpath` tool.
+
+The API regression also checks node-refinement balance decisions with unchanged
+separator weight. Its 64-bit fixture uses partition-weight differences beyond
+the C `int` range so that accidental narrowing cannot silently reject a valid
+balance improvement.
+
+Enable `GKLIB_BUILD_TESTING=ON` when a source-provider METIS build should also
+register GKlib's deterministic allocation-failure checks. They require mcore
+capacity growth to commit transactionally, failed tracked reallocations to
+retain the original record, partial constructors to clean up, and marker-rejected
+frees or mcore cleanup to retain ownership records and caller handles. These
+invariants preserve the state needed by METIS when a `SIGMEM` recovery point
+converts allocation failure into `METIS_ERROR_MEMORY`.
+
+The Python developer checks also exercise runtime copying, unchanged-file
+timestamps, missing and empty inputs, and bounded recovery from a transient
+Windows exclusive lock. A lock held beyond the retry budget must still fail.
 
 Use an initialized compiler environment and a separate build/install directory
 for each toolchain and ABI. Keep MSVC runtime selection consistent across the
@@ -43,7 +74,9 @@ GKlib retains its public C API under `/MT[d]`, with library-owned deallocation.
 See Microsoft's explanation of
 [CRT objects across DLL boundaries](https://learn.microsoft.com/en-us/cpp/c-runtime-library/potential-errors-passing-crt-objects-across-dll-boundaries).
 Cross-compiling probes compile and link without running target executables;
-execute CTest only when a target runtime or emulator is available.
+CTest runtime checks use the configured emulator or explicitly report a skip
+when it is absent. Build and link checks must still succeed before a composite
+scenario may report that runtime skip. See the [test execution contract](building.md#tests-and-maintenance).
 
 Use the `portable` preset for Release checks with IPO and native CPU tuning
 disabled in METIS and GKlib. Use `optimized` when IPO support is required in

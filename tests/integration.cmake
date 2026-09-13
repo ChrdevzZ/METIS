@@ -42,15 +42,40 @@ function(run)
   endif()
 endfunction()
 
+function(run_tests binary_dir)
+  if(TEST_CROSSCOMPILING AND NOT TEST_EMULATOR)
+    set_property(GLOBAL PROPERTY METIS_RUNTIME_WAS_SKIPPED TRUE)
+    return()
+  endif()
+  set(command "${CMAKE_CTEST_COMMAND}" --test-dir "${binary_dir}")
+  if(NOT CONFIG STREQUAL "")
+    list(APPEND command -C "${CONFIG}")
+  endif()
+  list(APPEND command --output-on-failure)
+  run(${command})
+endfunction()
+
 # Build, test, install and relocate the producer package first.
 set(configure_args -G "${GENERATOR}")
+if(TEST_INITIAL_CACHE)
+  list(APPEND configure_args -C "${TEST_INITIAL_CACHE}")
+endif()
+if(GENERATOR_INSTANCE)
+  list(APPEND configure_args
+    "-DCMAKE_GENERATOR_INSTANCE=${GENERATOR_INSTANCE}")
+endif()
+if(GENERATOR_PLATFORM)
+  list(APPEND configure_args -A "${GENERATOR_PLATFORM}")
+endif()
+if(GENERATOR_TOOLSET)
+  list(APPEND configure_args -T "${GENERATOR_TOOLSET}")
+endif()
 run("${CMAKE_COMMAND}" -S "${root}" -B "${build}/producer" ${configure_args}
   -DCMAKE_BUILD_TYPE=${CONFIG} -DMETIS_BUILD_SHARED_LIBS=${SHARED}
   -DMETIS_BUILD_TESTING=ON -DMETIS_BUILD_PROGRAMS=ON -DMETIS_INSTALL=ON
   -DMETIS_FETCH_GKLIB=OFF -DMETIS_GKLIB_PROVIDER=SOURCE -DMETIS_IPO=OFF)
 run("${CMAKE_COMMAND}" --build "${build}/producer" --config "${CONFIG}" --parallel 2)
-run("${CMAKE_CTEST_COMMAND}" --test-dir "${build}/producer" -C "${CONFIG}"
-  --output-on-failure)
+run_tests("${build}/producer")
 run("${CMAKE_COMMAND}" --install "${build}/producer" --config "${CONFIG}"
   --prefix "${build}/install")
 file(RENAME "${build}/install" "${build}/relocated")
@@ -71,36 +96,36 @@ run("${CMAKE_COMMAND}" -S "${root}" -B "${build}/system" ${configure_args}
   -DMETIS_BUILD_PROGRAMS=OFF -DMETIS_BUILD_TESTING=ON -DMETIS_INSTALL=OFF
   -DMETIS_IPO=OFF)
 run("${CMAKE_COMMAND}" --build "${build}/system" --config "${CONFIG}" --parallel 2)
-run("${CMAKE_CTEST_COMMAND}" --test-dir "${build}/system" -C "${CONFIG}"
-  --output-on-failure)
+run_tests("${build}/system")
 
 # Validate installed and source-tree consumers in both C and C++.
 run("${CMAKE_COMMAND}" -S "${root}/tests/integration/consumer"
   -B "${build}/package-c" ${configure_args} -DCMAKE_BUILD_TYPE=${CONFIG}
   -DCMAKE_PREFIX_PATH=${build}/relocated)
 run("${CMAKE_COMMAND}" --build "${build}/package-c" --config "${CONFIG}" --parallel 2)
-run("${CMAKE_CTEST_COMMAND}" --test-dir "${build}/package-c" -C "${CONFIG}"
-  --output-on-failure)
+run_tests("${build}/package-c")
 
 run("${CMAKE_COMMAND}" -S "${root}/tests/consumer" -B "${build}/package-cxx"
   ${configure_args} -DCMAKE_BUILD_TYPE=${CONFIG}
   -DCMAKE_PREFIX_PATH=${build}/relocated)
 run("${CMAKE_COMMAND}" --build "${build}/package-cxx" --config "${CONFIG}" --parallel 2)
-run("${CMAKE_CTEST_COMMAND}" --test-dir "${build}/package-cxx" -C "${CONFIG}"
-  --output-on-failure)
+run_tests("${build}/package-cxx")
 
 run("${CMAKE_COMMAND}" -S "${root}/tests/integration/consumer"
   -B "${build}/source-c" ${configure_args} -DCMAKE_BUILD_TYPE=${CONFIG}
   -DMETIS_TEST_SOURCE=${root} -DMETIS_BUILD_SHARED_LIBS=${SHARED})
 run("${CMAKE_COMMAND}" --build "${build}/source-c" --config "${CONFIG}" --parallel 2)
-run("${CMAKE_CTEST_COMMAND}" --test-dir "${build}/source-c" -C "${CONFIG}"
-  --output-on-failure)
+run_tests("${build}/source-c")
 
 run("${CMAKE_COMMAND}" -S "${root}/tests/consumer" -B "${build}/source-cxx"
   ${configure_args} -DCMAKE_BUILD_TYPE=${CONFIG} -DMETIS_TEST_SOURCE=${root}
   -DMETIS_BUILD_SHARED_LIBS=${SHARED})
 run("${CMAKE_COMMAND}" --build "${build}/source-cxx" --config "${CONFIG}" --parallel 2)
-run("${CMAKE_CTEST_COMMAND}" --test-dir "${build}/source-cxx" -C "${CONFIG}"
-  --output-on-failure)
+run_tests("${build}/source-cxx")
 
-message(STATUS "METIS install, relocation, package and subdirectory integration passed")
+get_property(runtime_was_skipped GLOBAL PROPERTY METIS_RUNTIME_WAS_SKIPPED)
+if(runtime_was_skipped)
+  message("METIS_RUNTIME_SKIPPED: no cross-compiling emulator")
+else()
+  message(STATUS "METIS install, relocation, package and subdirectory integration passed")
+endif()

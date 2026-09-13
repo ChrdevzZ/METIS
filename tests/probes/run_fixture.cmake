@@ -24,6 +24,13 @@ set(_probe_configure_command
   -S "${FIXTURE_SOURCE}"
   -B "${WORK_DIR}"
   -G "${GENERATOR}")
+if(TEST_INITIAL_CACHE)
+  list(APPEND _probe_configure_command -C "${TEST_INITIAL_CACHE}")
+endif()
+if(GENERATOR_INSTANCE)
+  list(APPEND _probe_configure_command
+    "-DCMAKE_GENERATOR_INSTANCE=${GENERATOR_INSTANCE}")
+endif()
 if(GENERATOR_PLATFORM)
   list(APPEND _probe_configure_command -A "${GENERATOR_PLATFORM}")
 endif()
@@ -58,6 +65,7 @@ function(run_probe_configure mode)
     message(FATAL_ERROR
       "Probe fixture configuration failed for ${mode}:\n${_probe_stdout}\n${_probe_stderr}")
   endif()
+  set(_probe_configure_stdout "${_probe_stdout}" PARENT_SCOPE)
 endfunction()
 
 # Reuse the binary directory where the scenario tests cache invalidation.
@@ -71,15 +79,49 @@ elseif(TEST_MODE STREQUAL "reconfigure")
   run_probe_configure(missing-library)
 elseif(TEST_MODE STREQUAL "environment")
   run_probe_configure(environment)
-elseif(TEST_MODE STREQUAL "default-debug-reconfigure")
+elseif(TEST_MODE STREQUAL "inactive-debug-reconfigure")
+  if(GENERATOR MATCHES "Multi-Config|Visual Studio|Xcode")
+    set(_probe_active_config "${TEST_CONFIG}")
+    if(NOT _probe_active_config OR _probe_active_config STREQUAL "Debug")
+      set(_probe_active_config Release)
+    endif()
+  else()
+    set(_probe_active_config Release)
+  endif()
   run_probe_configure(config-switch
+    -DPROBE_ACTIVE_CONFIG=${_probe_active_config}
     -DPROBE_EXPECT_RESULT=TRUE
-    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_BUILD_TYPE=${_probe_active_config}
     -DCMAKE_C_FLAGS_DEBUG=-DPROBE_CONFIG_VALID=1)
   run_probe_configure(config-switch
-    -DPROBE_EXPECT_RESULT=FALSE
-    -DCMAKE_BUILD_TYPE=Release
+    -DPROBE_ACTIVE_CONFIG=${_probe_active_config}
+    -DPROBE_EXPECT_RESULT=TRUE
+    -DCMAKE_BUILD_TYPE=${_probe_active_config}
     -DCMAKE_C_FLAGS_DEBUG=-DPROBE_CONFIG_BREAK=1)
+  if(_probe_configure_stdout MATCHES "Performing Test")
+    message(FATAL_ERROR
+      "Changing inactive Debug flags unnecessarily reran the link probe")
+  endif()
+elseif(TEST_MODE STREQUAL "active-link-flags")
+  if(GENERATOR MATCHES "Multi-Config|Visual Studio|Xcode")
+    set(_probe_active_config "${TEST_CONFIG}")
+    if(NOT _probe_active_config)
+      message(FATAL_ERROR
+        "A multi-config active-link-flags test requires TEST_CONFIG")
+    endif()
+  else()
+    set(_probe_active_config ProbeConfig)
+  endif()
+  run_probe_configure(config-link-valid
+    -DPROBE_ACTIVE_CONFIG=${_probe_active_config}
+    -DCMAKE_BUILD_TYPE=${_probe_active_config})
+  run_probe_configure(config-link-missing
+    -DPROBE_ACTIVE_CONFIG=${_probe_active_config}
+    -DCMAKE_BUILD_TYPE=${_probe_active_config})
+elseif(TEST_MODE STREQUAL "custom-linker-cache")
+  run_probe_configure(custom-linker-cache)
+elseif(TEST_MODE STREQUAL "ignored-option")
+  run_probe_configure(ignored-option)
 elseif(TEST_MODE STREQUAL "config-reconfigure")
   run_probe_configure(config-switch
     -DPROBE_EXPECT_RESULT=TRUE
@@ -103,8 +145,16 @@ elseif(TEST_MODE STREQUAL "gprof")
       "The gprof probe passed, but the executable build failed:\n${_probe_stdout}\n${_probe_stderr}")
   endif()
 elseif(TEST_MODE STREQUAL "msvc-asan-runtime")
+  if(NOT DEFINED C_COMPILER_VERSION)
+    message(FATAL_ERROR "The MSVC ASan probe requires C_COMPILER_VERSION")
+  endif()
+  if(C_COMPILER_VERSION VERSION_GREATER_EQUAL 19.28)
+    set(_probe_asan_supported TRUE)
+  else()
+    set(_probe_asan_supported FALSE)
+  endif()
   run_probe_configure(msvc-asan
-    -DPROBE_EXPECT_RESULT=TRUE
+    -DPROBE_EXPECT_RESULT=${_probe_asan_supported}
     "-DCMAKE_EXE_LINKER_FLAGS=")
   set(_probe_asan_block_flags
     "/NODEFAULTLIB:clang_rt.asan_dynamic-x86_64.lib /NODEFAULTLIB:clang_rt.asan_dynamic_runtime_thunk-x86_64.lib /NODEFAULTLIB:clang_rt.asan_dbg_dynamic-x86_64.lib /NODEFAULTLIB:clang_rt.asan_dbg_dynamic_runtime_thunk-x86_64.lib /NODEFAULTLIB:libvcasan.lib /NODEFAULTLIB:libvcasand.lib /NODEFAULTLIB:vcasan.lib /NODEFAULTLIB:vcasand.lib")

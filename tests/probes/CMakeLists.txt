@@ -16,10 +16,15 @@ function(metis_add_probe_test name module function test_mode)
       "-DTEST_MODE=${test_mode}"
       "-DINHERITED_TARGET_TYPE=${_metis_probe_inherited_target_type}"
       "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
       "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
       "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DTEST_INITIAL_CACHE=${_metis_test_initial_cache}"
+      "-DTEST_CONFIG=$<CONFIG>"
       "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
       "-DC_COMPILER=${CMAKE_C_COMPILER}"
+      "-DC_COMPILER_ID=${CMAKE_C_COMPILER_ID}"
+      "-DC_COMPILER_VERSION=${CMAKE_C_COMPILER_VERSION}"
       "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
       -P "${_metis_probe_runner}")
   set_tests_properties("metis.probe.${name}" PROPERTIES TIMEOUT 120)
@@ -73,7 +78,7 @@ if(MSVC AND CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     gklib_check_link msvc-asan-runtime)
 endif()
 
-# Environment inputs and default Debug flags must invalidate cached probes.
+# Environment inputs and effective configuration flags control cached probes.
 foreach(_project metis gklib)
   if(_project STREQUAL "metis")
     set(_module "${PROJECT_SOURCE_DIR}/cmake/MetisCheckLink.cmake")
@@ -83,7 +88,22 @@ foreach(_project metis gklib)
   metis_add_probe_test(${_project}-environment
     "${_module}" ${_project}_check_link environment)
   if(MSVC)
-    metis_add_probe_test(${_project}-default-debug-reconfigure
-      "${_module}" ${_project}_check_link default-debug-reconfigure)
+    metis_add_probe_test(${_project}-inactive-debug-reconfigure
+      "${_module}" ${_project}_check_link inactive-debug-reconfigure)
+  endif()
+  metis_add_probe_test(${_project}-active-link-flags
+    "${_module}" ${_project}_check_link active-link-flags)
+
+  if(MSVC OR CMAKE_C_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
+    metis_add_probe_test(${_project}-ignored-option
+      "${_module}" ${_project}_check_link ignored-option)
+  endif()
+
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.29 AND
+      CMAKE_C_COMPILER_ID STREQUAL "Clang" AND
+      CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "GNU" AND
+      DEFINED CMAKE_C_USING_LINKER_SYSTEM)
+    metis_add_probe_test(${_project}-custom-linker-cache
+      "${_module}" ${_project}_check_link custom-linker-cache)
   endif()
 endforeach()

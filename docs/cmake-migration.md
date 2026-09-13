@@ -6,9 +6,10 @@ see [fork changes](../FORK_CHANGES.md). Current commands and defaults are in the
 and reference links.
 
 
-The migration separates public headers, private library implementation, applications,
-and external dependencies. Each directory owns its targets and source lists. The
-algorithm sources retain their existing implementation and formatting.
+The migration separates public headers, private library implementation,
+applications, and external dependencies. Each directory owns its targets and
+source lists. Upstream algorithms and source formatting are retained except for
+the documented correctness and platform fixes in [fork changes](../FORK_CHANGES.md).
 
 ## Build contracts
 
@@ -32,8 +33,9 @@ files to generate exports, which fails for IPO builds.
 
 Three CLI output routines allocate filename buffers from the heap. Their former
 large local arrays overflowed the default Windows stack before writing output.
-The allocation is sized from the input filename and freed after use. Linux-only
-resource reporting is guarded by the target operating system.
+The allocation is sized from the input filename and freed after use. Resource
+usage reporting remains available on supported non-Apple Unix systems; reading
+peak virtual memory from `/proc` is guarded separately for Linux.
 
 Regex selection checks both the header and linkable functions. A header alone
 is insufficient on MINGW64. Math and instrumentation probes also check the final

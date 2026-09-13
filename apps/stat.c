@@ -1,5 +1,5 @@
 /*!
-\file  gklib.c
+\file  stat.c
 \brief Functions for printing various statistics for the computed partitionings
        and orderings.
 

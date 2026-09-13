@@ -7,7 +7,9 @@ if(NOT DEFINED MODULE_DIR)
 endif()
 list(PREPEND CMAKE_MODULE_PATH "${MODULE_DIR}")
 
-# Make synthetic Windows archives discoverable on every developer host.
+# The Python harness disables environment-derived search paths so these
+# closed-world tests cannot borrow a developer's installed Intel libraries.
+# Make the synthetic Windows archives discoverable on every host.
 set(CMAKE_FIND_LIBRARY_PREFIXES "")
 set(CMAKE_FIND_LIBRARY_SUFFIXES ".lib")
 set(CMAKE_C_COMPILER_ARCHITECTURE_ID "${TARGET_ARCH}")

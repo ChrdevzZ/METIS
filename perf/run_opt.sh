@@ -16,7 +16,7 @@ fi
 echo "build ok"
 
 echo "=== [$LABEL] verify (bit-identical gate) ==="
-if ! perf/harness.sh verify "${METIS_REFERENCE_DIR:-$ROOT/perf/ref}"; then
+if ! perf/harness.sh verify "${METIS_REFERENCE_DIR:-$BUILD/perf/reference}"; then
   echo ">>> VERIFY FAILED — output not bit-identical; NOT benching <<<"; exit 2
 fi
 

@@ -30,6 +30,12 @@ set(configure_command
   "${CMAKE_COMMAND}"
   -S "${CMAKE_CURRENT_LIST_DIR}"
   -G "${GENERATOR}")
+if(TEST_INITIAL_CACHE)
+  list(APPEND configure_command -C "${TEST_INITIAL_CACHE}")
+endif()
+if(GENERATOR_INSTANCE)
+  list(APPEND configure_command "-DCMAKE_GENERATOR_INSTANCE=${GENERATOR_INSTANCE}")
+endif()
 if(GENERATOR_PLATFORM)
   list(APPEND configure_command -A "${GENERATOR_PLATFORM}")
 endif()
@@ -50,12 +56,18 @@ list(APPEND configure_command
   "-DTARGET_IPO_FUNCTION=${TARGET_IPO_FUNCTION}"
   "-DCHECK_IPO_FUNCTION=${CHECK_IPO_FUNCTION}"
   "-DIPO_POLICY_VARIABLE=${IPO_POLICY_VARIABLE}"
-  "-DBUILD_PROGRAMS_VARIABLE=${BUILD_PROGRAMS_VARIABLE}"
-  "-DCMAKE_BUILD_TYPE=")
+  "-DBUILD_PROGRAMS_VARIABLE=${BUILD_PROGRAMS_VARIABLE}")
 
 function(run_configure mode build_dir)
+  set(configure_options "")
+  if(mode STREQUAL "MOCK")
+    # The policy fixture deliberately also exercises a single empty config.
+    list(APPEND configure_options "-DCMAKE_BUILD_TYPE=")
+  elseif(DEFINED TEST_CONFIG)
+    list(APPEND configure_options "-DCMAKE_BUILD_TYPE=${TEST_CONFIG}")
+  endif()
   execute_process(
-    COMMAND ${configure_command} -B "${build_dir}" "-DIPO_TEST_MODE=${mode}"
+    COMMAND ${configure_command} -B "${build_dir}" "-DIPO_TEST_MODE=${mode}" ${configure_options}
     RESULT_VARIABLE result
     OUTPUT_VARIABLE stdout
     ERROR_VARIABLE stderr)
@@ -84,3 +96,20 @@ endif()
 # sentinels written into their first diagnostics.
 run_configure(REAL "${cache_build}")
 run_configure(REAL "${cache_build}")
+
+# Both policies encounter the same real shared-link failure. Only the
+# explicitly required policy may make the parent configuration fail.
+foreach(policy AUTO ON)
+  execute_process(COMMAND ${configure_command}
+      -B "${WORK_DIR}/failure-${policy}"
+      -DIPO_TEST_MODE=FAILURE "-DTEST_POLICY=${policy}"
+      -DCMAKE_BUILD_TYPE=Release -DCMAKE_CONFIGURATION_TYPES=Release
+    RESULT_VARIABLE result OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(policy STREQUAL "AUTO")
+    if(NOT result STREQUAL "0" OR NOT stdout MATCHES "AUTO IPO disabled")
+      message(FATAL_ERROR "AUTO did not recover from its failed link:\n${stdout}\n${stderr}")
+    endif()
+  elseif(result STREQUAL "0" OR NOT stderr MATCHES "Requested .* IPO for configuration")
+    message(FATAL_ERROR "Explicit IPO failure lacked the required diagnostic:\n${stdout}\n${stderr}")
+  endif()
+endforeach()

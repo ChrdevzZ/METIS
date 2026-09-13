@@ -48,6 +48,26 @@ endfunction()
 set(args -G "${GENERATOR}" "-DBUILD_SHARED_LIBS=${TEST_SHARED}"
   -DCMAKE_INSTALL_LIBDIR=custom/lib "-DTEST_SOURCE_DIR=${source}"
   "-DTEST_PROJECT=${TEST_PROJECT}" -DCMAKE_BUILD_TYPE=Debug)
+if(DEFINED TEST_INITIAL_CACHE AND NOT TEST_INITIAL_CACHE STREQUAL "")
+  set(_ownership_initial_cache "${work}/ownership-initial-cache.cmake")
+  configure_file("${TEST_INITIAL_CACHE}" "${_ownership_initial_cache}" COPYONLY)
+else()
+  set(_ownership_initial_cache "${work}/ownership-initial-cache.cmake")
+  file(WRITE "${_ownership_initial_cache}" "")
+endif()
+# The fixture intentionally merges these two configurations even when its
+# parent exposes a different multi-config list. Seed that conflicting parent
+# state, then state the configurations owned by this test after loading it.
+file(APPEND "${_ownership_initial_cache}"
+  "\nset(CMAKE_CONFIGURATION_TYPES ParentOnly CACHE STRING \"\" FORCE)\n")
+set(_ownership_config_cache "${work}/ownership-configurations.cmake")
+file(WRITE "${_ownership_config_cache}"
+  "set(CMAKE_CONFIGURATION_TYPES \"Debug;Release\" CACHE STRING \"\" FORCE)\n")
+list(APPEND args -C "${_ownership_initial_cache}"
+  -C "${_ownership_config_cache}")
+if(DEFINED GENERATOR_INSTANCE AND NOT GENERATOR_INSTANCE STREQUAL "")
+  list(APPEND args "-DCMAKE_GENERATOR_INSTANCE=${GENERATOR_INSTANCE}")
+endif()
 foreach(variable CMAKE_MAKE_PROGRAM CMAKE_C_COMPILER CMAKE_TOOLCHAIN_FILE)
   if(DEFINED ${variable} AND NOT "${${variable}}" STREQUAL "")
     list(APPEND args "-D${variable}=${${variable}}")

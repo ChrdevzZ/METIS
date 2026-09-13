@@ -25,6 +25,15 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/METISTargets.cmake")
 
+# Static ASan objects require the compatible producer runtime SDK at final link.
+if(@METIS_CONFIG_NEEDS_ASAN@)
+  include("${CMAKE_CURRENT_LIST_DIR}/WindowsASan.cmake")
+  windows_asan_import(METIS::metis METIS "${CMAKE_CURRENT_LIST_DIR}")
+  if(DEFINED METIS_FOUND AND NOT METIS_FOUND)
+    return()
+  endif()
+endif()
+
 if(@METIS_CONFIG_NEEDS_INTEL_RUNTIME@)
   intel_runtime_import(METIS::metis METIS "${CMAKE_CURRENT_LIST_DIR}")
 endif()

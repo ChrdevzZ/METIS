@@ -13,6 +13,9 @@ endif()
 if(NOT DEFINED GENERATOR)
   set(GENERATOR Ninja)
 endif()
+if(NOT DEFINED CONFIG)
+  set(CONFIG Debug)
+endif()
 cmake_path(IS_PREFIX build "${root}" NORMALIZE contains_source)
 if(contains_source)
   message(FATAL_ERROR "The dependency test directory must not contain the source tree")
@@ -52,10 +55,36 @@ function(run)
   endif()
 endfunction()
 
+function(run_tests binary_dir)
+  if(TEST_CROSSCOMPILING AND NOT TEST_EMULATOR)
+    set_property(GLOBAL PROPERTY METIS_RUNTIME_WAS_SKIPPED TRUE)
+    return()
+  endif()
+  set(command "${CMAKE_CTEST_COMMAND}" --test-dir "${binary_dir}")
+  if(NOT CONFIG STREQUAL "")
+    list(APPEND command -C "${CONFIG}")
+  endif()
+  list(APPEND command --output-on-failure)
+  run(${command})
+endfunction()
+
 # SOURCE mode without a source must fail before an accidental network request.
-set(options -G "${GENERATOR}" -DCMAKE_BUILD_TYPE=Debug -DMETIS_IPO=OFF
+set(options -G "${GENERATOR}" -DMETIS_IPO=OFF
   -DMETIS_BUILD_PROGRAMS=OFF -DMETIS_BUILD_TESTING=OFF -DMETIS_INSTALL=OFF
   -DMETIS_GKLIB_PROVIDER=SOURCE)
+if(TEST_INITIAL_CACHE)
+  list(APPEND options -C "${TEST_INITIAL_CACHE}")
+endif()
+list(APPEND options "-DCMAKE_BUILD_TYPE=${CONFIG}")
+if(GENERATOR_INSTANCE)
+  list(APPEND options "-DCMAKE_GENERATOR_INSTANCE=${GENERATOR_INSTANCE}")
+endif()
+if(GENERATOR_PLATFORM)
+  list(APPEND options -A "${GENERATOR_PLATFORM}")
+endif()
+if(GENERATOR_TOOLSET)
+  list(APPEND options -T "${GENERATOR_TOOLSET}")
+endif()
 execute_process(COMMAND "${CMAKE_COMMAND}" -S "${snapshot}"
   -B "${build}/missing" ${options} -DMETIS_FETCH_GKLIB=OFF
   RESULT_VARIABLE missing_result OUTPUT_VARIABLE output ERROR_VARIABLE error)
@@ -67,7 +96,8 @@ endif()
 run("${CMAKE_COMMAND}" -S "${snapshot}" -B "${build}/override" ${options}
   -DMETIS_FETCH_GKLIB=ON -DFETCHCONTENT_FULLY_DISCONNECTED=ON
   -DFETCHCONTENT_SOURCE_DIR_GKLIB=${root}/ext/GKlib)
-run("${CMAKE_COMMAND}" --build "${build}/override" --config Debug --parallel 2)
+run("${CMAKE_COMMAND}" --build "${build}/override" --config "${CONFIG}"
+  --parallel 2)
 
 # A parent FetchContent declaration must also satisfy METIS as a subproject.
 file(WRITE "${build}/parent/CMakeLists.txt" "cmake_minimum_required(VERSION 3.24)
@@ -86,7 +116,13 @@ int main(void) { idx_t options[METIS_NOPTIONS];
 ")
 run("${CMAKE_COMMAND}" -S "${build}/parent" -B "${build}/parent-build" ${options}
   -DMETIS_FETCH_GKLIB=ON -DFETCHCONTENT_FULLY_DISCONNECTED=ON)
-run("${CMAKE_COMMAND}" --build "${build}/parent-build" --config Debug --parallel 2)
-run("${CMAKE_CTEST_COMMAND}" --test-dir "${build}/parent-build" -C Debug
-  --output-on-failure)
-message(STATUS "Missing dependency, offline source override, and parent FetchContent override passed")
+run("${CMAKE_COMMAND}" --build "${build}/parent-build" --config "${CONFIG}"
+  --parallel 2)
+run_tests("${build}/parent-build")
+get_property(runtime_was_skipped GLOBAL PROPERTY METIS_RUNTIME_WAS_SKIPPED)
+if(runtime_was_skipped)
+  message("METIS_RUNTIME_SKIPPED: no cross-compiling emulator")
+else()
+  message(STATUS
+    "Missing dependency, offline source override, and parent FetchContent override passed")
+endif()

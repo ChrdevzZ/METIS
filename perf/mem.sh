@@ -1,5 +1,5 @@
 #!/bin/bash
-# Peak-memory A/B: baseline binary (/tmp/baseline_bin) vs current (./build/programs).
+# Peak-memory A/B: baseline binary (/tmp/baseline_bin) vs current build apps.
 # Reports METIS gk-tracked heap high-water ("Max memory used", dbglvl=0) for each,
 # plus OS max RSS via /usr/bin/time -l as a ground-truth cross-check.
 # Usage: perf/mem.sh

@@ -3,19 +3,52 @@ set -u
 PATH=/usr/bin:/bin:$PATH
 export PATH
 
-ROOT=$1
+if [ "$#" -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
+  echo "Usage: run-tests.sh SOURCE_DIR OWNED_WORK_DIR" >&2
+  exit 1
+fi
+ROOT=$(cd "$1" && pwd -P) || exit 1
 WORK=$2
+
+# Only this fixture's marked workspace may be cleared on repeated runs.
+# Resolve physical paths before checking source ancestry; never follow a
+# workspace symlink or adopt an existing unmarked directory.
+if [ -L "$WORK" ] || { [ -e "$WORK" ] && [ ! -d "$WORK" ]; }; then
+  echo "Invalid performance test work directory: $WORK" >&2
+  exit 1
+fi
+if [ -d "$WORK" ] && { [ ! -f "$WORK/.metis-perf-test-work" ] ||
+    [ -L "$WORK/.metis-perf-test-work" ]; }; then
+  echo "Performance test directory is not owned by this fixture: $WORK" >&2
+  exit 1
+fi
+mkdir -p "$WORK" || exit 1
+WORK=$(cd "$WORK" && pwd -P) || exit 1
+case "$ROOT/" in
+  "$WORK/"*)
+    echo "Performance test work directory must not contain the source tree" >&2
+    exit 1
+    ;;
+esac
+if [ "$WORK" = / ]; then
+  echo "The filesystem root cannot be a performance test work directory" >&2
+  exit 1
+fi
 TEST_DIR="$ROOT/tests/perf"
 GRAPH_DIR="$WORK/input-graphs"
 EMPTY_GRAPH_DIR="$WORK/empty-graphs"
 BIN_DIR="$WORK/bin"
-BIN_PATH=$(cygpath -u "$BIN_DIR")
+BIN_PATH=$BIN_DIR
+if command -v cygpath >/dev/null 2>&1; then
+  BIN_PATH=$(cygpath -u "$BIN_DIR")
+fi
 MISSING_BIN_DIR="$WORK/missing-bin"
 REF_DIR="$WORK/ref"
 LOG_DIR="$WORK/logs"
 
-rm -rf "$WORK"
-mkdir -p "$GRAPH_DIR" "$EMPTY_GRAPH_DIR" "$BIN_DIR" "$LOG_DIR"
+rm -rf "$WORK" || exit 1
+mkdir -p "$GRAPH_DIR" "$EMPTY_GRAPH_DIR" "$BIN_DIR" "$LOG_DIR" || exit 1
+: >"$WORK/.metis-perf-test-work" || exit 1
 printf '1 0\n' >"$GRAPH_DIR/mdual.graph"
 cp "$TEST_DIR/fake_metis.sh" "$BIN_DIR/gpmetis"
 cp "$TEST_DIR/fake_metis.sh" "$BIN_DIR/ndmetis"
@@ -84,6 +117,14 @@ run_opt() {
     METIS_BIN_DIR="$BIN_DIR" METIS_GRAPH_DIR="$GRAPH_DIR" \
     METIS_REFERENCE_DIR="$REF_DIR" bash "$ROOT/perf/run_opt.sh" "$@"
 }
+run_opt_default_reference() {
+  local mode=$1 build=$2
+  shift 2
+  env PATH="$BIN_PATH:$PATH" FAKE_MODE="$mode" \
+    FAKE_CMAKE_MARKER="$build/cmake-called" METIS_BUILD_DIR="$build" \
+    METIS_BIN_DIR="$BIN_DIR" METIS_GRAPH_DIR="$GRAPH_DIR" \
+    bash "$ROOT/perf/run_opt.sh" "$@"
+}
 
 expect_success reference run_harness valid "$GRAPH_DIR" ref "$REF_DIR"
 assert_equal 8 "$(wc -l <"$REF_DIR/manifest.txt")"
@@ -126,6 +167,10 @@ expect_failure run-opt-failed-bench run_opt empty-timing "$WORK/run-opt-failed" 
 assert_file_absent "$WORK/run-opt-failed/perf/RESULTS.tsv"
 mkdir -p "$WORK/run-opt-valid"
 expect_success run-opt-valid run_opt valid "$WORK/run-opt-valid" valid 1
+mkdir -p "$WORK/run-opt-default/perf/reference"
+cp -R "$REF_DIR/." "$WORK/run-opt-default/perf/reference/"
+expect_success run-opt-default-reference run_opt_default_reference valid \
+  "$WORK/run-opt-default" default-reference 1
 
 if [ "$failures" -ne 0 ]; then
   printf '%s performance script tests failed\n' "$failures" >&2
