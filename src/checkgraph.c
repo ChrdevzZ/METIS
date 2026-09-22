@@ -44,6 +44,11 @@ int CheckGraph(graph_t *graph, int numflag, int verbose)
   adjwgt = graph->adjwgt;
 
   htable = ismalloc(nvtxs, 0, "htable");
+  if (htable == NULL) {
+    if (errno == 0)
+      errno = ENOMEM;
+    return 0;
+  }
 
   if (graph->nedges > 0) {
     minedge = maxedge = adjncy[0];
@@ -132,6 +137,10 @@ int CheckInputGraphWeights(idx_t nvtxs, idx_t ncon, idx_t *xadj, idx_t *adjncy,
     return 0;
   }
 
+  if (nvtxs < 0 || ncon <= 0 || nvtxs > IDX_MAX/ncon) {
+    printf("Input Error: invalid graph-weight dimensions.\n");
+    return 0;
+  }
   if (vwgt) {
     for (i=ncon*nvtxs-1; i>=0; i--) {
       if (vwgt[i] < 0) {
@@ -150,7 +159,7 @@ int CheckInputGraphWeights(idx_t nvtxs, idx_t ncon, idx_t *xadj, idx_t *adjncy,
   }
   if (adjwgt) {
     for (i=xadj[nvtxs]-1; i>=0; i--) {
-      if (adjwgt[i] < 0) {
+      if (adjwgt[i] <= 0) {
         printf("Input Error: non-positive edge weight(s).\n");
         return 0;
       }
@@ -180,34 +189,80 @@ int CheckInputGraphWeights(idx_t nvtxs, idx_t ncon, idx_t *xadj, idx_t *adjncy,
 /*************************************************************************/
 graph_t *FixGraph(graph_t *graph)
 {
-  idx_t i, j, k, l, nvtxs, nedges;
+  idx_t i, j, k, nvtxs, nedges;
   idx_t *xadj, *adjncy, *adjwgt;
   idx_t *nxadj, *nadjncy, *nadjwgt;
   graph_t *ngraph;
-  uvw_t *edges;
+  uvw_t *edges=NULL;
+  size_t directed_count, vertex_weights;
 
+
+  if (graph == NULL) {
+    errno = EINVAL;
+    return NULL;
+  }
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
   adjncy = graph->adjncy;
   adjwgt = graph->adjwgt;
-  ASSERT(adjwgt != NULL);
-
   ngraph = CreateGraph();
+  if (ngraph == NULL)
+    return NULL;
 
   ngraph->nvtxs = nvtxs;
 
   /* deal with vertex weights/sizes */
   ngraph->ncon  = graph->ncon;
-  ngraph->vwgt  = icopy(nvtxs*graph->ncon, graph->vwgt, 
-                        imalloc(nvtxs*graph->ncon, "FixGraph: vwgt"));
+  if (nvtxs < 0 || graph->ncon <= 0 || xadj == NULL || xadj[0] != 0 ||
+      xadj[nvtxs] < 0 ||
+      (xadj[nvtxs] > 0 && (adjncy == NULL || adjwgt == NULL))) {
+    errno = EINVAL;
+    goto FAILURE;
+  }
+  if (nvtxs == IDX_MAX || nvtxs > IDX_MAX/graph->ncon ||
+      (uintmax_t)nvtxs*(uintmax_t)graph->ncon >
+          (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
+      (uintmax_t)nvtxs+1 > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
+      (uintmax_t)xadj[nvtxs] > (uintmax_t)SIZE_MAX/sizeof(uvw_t)) {
+    errno = EOVERFLOW;
+    goto FAILURE;
+  }
+  for (i=0; i<nvtxs; i++) {
+    if (xadj[i] > xadj[i+1]) {
+      errno = EINVAL;
+      goto FAILURE;
+    }
+    for (j=xadj[i]; j<xadj[i+1]; j++) {
+      if (adjncy[j] < 0 || adjncy[j] >= nvtxs) {
+        errno = EINVAL;
+        goto FAILURE;
+      }
+    }
+  }
+  vertex_weights = (size_t)nvtxs*(size_t)graph->ncon;
+  ngraph->vwgt = imalloc(vertex_weights, "FixGraph: vwgt");
+  if (ngraph->vwgt == NULL)
+    goto FAILURE;
+  if (graph->vwgt != NULL)
+    icopy(vertex_weights, graph->vwgt, ngraph->vwgt);
+  else
+    iset(vertex_weights, 1, ngraph->vwgt);
 
   ngraph->vsize = ismalloc(nvtxs, 1, "FixGraph: vsize");
+  if (ngraph->vsize == NULL)
+    goto FAILURE;
   if (graph->vsize)
     icopy(nvtxs, graph->vsize, ngraph->vsize);
 
   /* fix graph by sorting the "superset" of edges */
-  edges = (uvw_t *)gk_malloc(sizeof(uvw_t)*2*xadj[nvtxs], "FixGraph: edges");
+  directed_count = (size_t)xadj[nvtxs];
+  if (directed_count > 0) {
+    edges = (uvw_t *)gk_malloc(directed_count*sizeof(uvw_t),
+        "FixGraph: edges");
+    if (edges == NULL)
+      goto FAILURE;
+  }
 
   for (nedges=0, i=0; i<nvtxs; i++) {
     for (j=xadj[i]; j<xadj[i+1]; j++) {
@@ -227,21 +282,32 @@ graph_t *FixGraph(graph_t *graph)
     }
   }
 
-  uvwsorti(nedges, edges);
+  if (nedges > 0)
+    uvwsorti(nedges, edges);
 
 
   /* keep the unique subset */
-  for (k=0, i=1; i<nedges; i++) {
-    if (edges[k].v != edges[i].v || edges[k].u != edges[i].u) {
-      edges[++k] = edges[i];
+  if (nedges > 0) {
+    for (k=0, i=1; i<nedges; i++) {
+      if (edges[k].v != edges[i].v || edges[k].u != edges[i].u) {
+        edges[++k] = edges[i];
+      }
     }
+    nedges = k+1;
   }
-  nedges = k+1;
+  if (nedges > IDX_MAX/2 ||
+      (uintmax_t)nedges > (uintmax_t)SIZE_MAX/(2*sizeof(idx_t))) {
+    errno = EOVERFLOW;
+    goto FAILURE;
+  }
 
   /* allocate memory for the fixed graph */
   nxadj   = ngraph->xadj   = ismalloc(nvtxs+1, 0, "FixGraph: nxadj");
   nadjncy = ngraph->adjncy = imalloc(2*nedges, "FixGraph: nadjncy");
   nadjwgt = ngraph->adjwgt = imalloc(2*nedges, "FixGraph: nadjwgt");
+  if (nxadj == NULL || nadjncy == NULL || nadjwgt == NULL)
+    goto FAILURE;
+  ngraph->nedges = 2*nedges;
 
   /* create the adjacency list of the fixed graph from the upper-triangular
      part of the adjacency matrix */
@@ -264,5 +330,11 @@ graph_t *FixGraph(graph_t *graph)
   gk_free((void **)&edges, LTERM);
 
   return ngraph;
-}
 
+FAILURE:
+  if (errno == 0)
+    errno = ENOMEM;
+  gk_free((void **)&edges, LTERM);
+  FreeGraph(&ngraph);
+  return NULL;
+}

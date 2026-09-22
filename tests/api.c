@@ -127,6 +127,49 @@ int main(void)
   CHECK(sizeof(real_t)*8 == REALTYPEWIDTH);
   CHECK(CheckGraph(n, 12, xadj, adjncy, NULL));
   {
+    idx_t wn = 100, wncon = 1, wnparts = 2, wcut;
+    idx_t wxadj[101], wadjncy[200], wvwgt[100], wpart[100];
+    idx_t woptions[METIS_NOPTIONS];
+
+    for (i=0; i<wn; i++) {
+      wxadj[i] = 2*i;
+      wadjncy[2*i]   = (i+wn-1)%wn;
+      wadjncy[2*i+1] = (i+1)%wn;
+      wvwgt[i] = IDX_MAX/wn;
+    }
+    wxadj[wn] = 2*wn;
+    wvwgt[wn-1] += IDX_MAX%wn;
+
+    CHECK(METIS_SetDefaultOptions(woptions) == METIS_OK);
+    woptions[METIS_OPTION_NITER] = 1;
+    woptions[METIS_OPTION_SEED] = 12345;
+    CHECK(METIS_PartGraphRecursive(&wn, &wncon, wxadj, wadjncy, wvwgt,
+        NULL, NULL, &wnparts, NULL, NULL, woptions, &wcut, wpart) ==
+        METIS_OK);
+    CHECK(CheckPartition(wn, wnparts, wxadj, wadjncy, NULL, wpart, wcut));
+  }
+  {
+    idx_t wn = 100, wcut, woptions[METIS_NOPTIONS];
+    idx_t wxadj[101], wadjncy[200], wvwgt[100], wpart[100];
+
+    for (i=0; i<wn; i++) {
+      wxadj[i] = 2*i;
+      wadjncy[2*i]   = (i+wn-1)%wn;
+      wadjncy[2*i+1] = (i+1)%wn;
+      wvwgt[i] = IDX_MAX/wn;
+    }
+    wxadj[wn] = 2*wn;
+    wvwgt[wn-1] += IDX_MAX%wn;
+
+    CHECK(METIS_SetDefaultOptions(woptions) == METIS_OK);
+    woptions[METIS_OPTION_NITER] = IDX_MAX;
+    woptions[METIS_OPTION_UFACTOR] = IDX_MAX;
+    woptions[METIS_OPTION_SEED] = 12345;
+    CHECK(METIS_ComputeVertexSeparator(&wn, wxadj, wadjncy, wvwgt,
+        woptions, &wcut, wpart) == METIS_OK);
+    CHECK(wcut >= 0 && wcut <= IDX_MAX);
+  }
+  {
 #if IDXTYPEWIDTH == 64
     const idx_t unit = (idx_t)1 << 30;
 #else
@@ -185,6 +228,34 @@ int main(void)
       &nparts, NULL, NULL, options, &cut, part) == METIS_OK);
   CHECK(cut >= 0 && cut <= 6);
   CHECK(CheckPartition(n, nparts, xadj, adjncy, NULL, part, cut));
+  {
+    idx_t bn = 4, bncon = 1, bnparts = 2, bcut;
+    idx_t bxadj[] = {0, 1, 2, 3, 4};
+    idx_t badjncy[] = {1, 0, 3, 2};
+    idx_t bvwgt[] = {1, 2, 3, 4};
+    idx_t bpart[4], boptions[METIS_NOPTIONS];
+
+    CHECK(METIS_SetDefaultOptions(boptions) == METIS_OK);
+    boptions[METIS_OPTION_DBGLVL] = 512;
+    boptions[METIS_OPTION_SEED] = 12345;
+    CHECK(METIS_PartGraphKway(&bn, &bncon, bxadj, badjncy, bvwgt, NULL,
+        NULL, &bnparts, NULL, NULL, boptions, &bcut, bpart) == METIS_OK);
+    CHECK(CheckPartition(bn, bnparts, bxadj, badjncy, NULL, bpart, bcut));
+  }
+  {
+    idx_t bn = 4, bncon = 2, bnparts = 2, bcut;
+    idx_t bxadj[] = {0, 1, 2, 3, 4};
+    idx_t badjncy[] = {1, 0, 3, 2};
+    idx_t bvwgt[] = {8, 1, 8, 1, 1, 8, 1, 8};
+    idx_t bpart[4], boptions[METIS_NOPTIONS];
+
+    CHECK(METIS_SetDefaultOptions(boptions) == METIS_OK);
+    boptions[METIS_OPTION_DBGLVL] = 512;
+    boptions[METIS_OPTION_SEED] = 12345;
+    CHECK(METIS_PartGraphKway(&bn, &bncon, bxadj, badjncy, bvwgt, NULL,
+        NULL, &bnparts, NULL, NULL, boptions, &bcut, bpart) == METIS_OK);
+    CHECK(CheckPartition(bn, bnparts, bxadj, badjncy, NULL, bpart, bcut));
+  }
   CHECK(METIS_PartGraphRecursive(&n, &ncon, xadj, adjncy, NULL, NULL, NULL,
       &nparts, NULL, NULL, options, &cut, part) == METIS_OK);
   CHECK(CheckPartition(n, nparts, xadj, adjncy, NULL, part, cut));
@@ -192,6 +263,31 @@ int main(void)
   for (i=0; i<n; i++) {
     CHECK(perm[i] >= 0 && perm[i] < n);
     CHECK(iperm[perm[i]] == i);
+  }
+  {
+    idx_t old2new[6], sepsize, sizes[3];
+
+    CHECK(METIS_NodeNDP(n, xadj, adjncy, NULL, 2, options, perm, iperm,
+        sizes) == METIS_OK);
+    for (i=0; i<n; i++) {
+      CHECK(perm[i] >= 0 && perm[i] < n);
+      CHECK(iperm[perm[i]] == i);
+    }
+    CHECK(METIS_ComputeVertexSeparator(&n, xadj, adjncy, NULL, options,
+        &sepsize, part) == METIS_OK);
+    CHECK(sepsize >= 0 && sepsize <= n);
+    for (i=0; i<n; i++)
+      CHECK(part[i] >= 0 && part[i] <= 2);
+    CHECK(METIS_CacheFriendlyReordering(n, xadj, adjncy, part,
+        old2new) == METIS_OK);
+    for (i=0; i<n; i++)
+      perm[i] = 0;
+    for (i=0; i<n; i++) {
+      CHECK(old2new[i] >= 0 && old2new[i] < n);
+      perm[old2new[i]]++;
+    }
+    for (i=0; i<n; i++)
+      CHECK(perm[i] == 1);
   }
   CHECK(METIS_MeshToDual(&ne, &nn, eptr, eind, &ncommon, &numflag,
       &mxadj, &madjncy) == METIS_OK);

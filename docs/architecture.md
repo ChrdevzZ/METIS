@@ -26,6 +26,22 @@ side effect of refactoring. Internal allocation uses GKlib and workspace push/po
 patterns. Public callers release returned allocations through `METIS_Free`.
 
 Follow the status contract of each API declaration rather than assuming every
-internal helper returns a METIS status. Use `METIS_SetDefaultOptions` to initialize
-option arrays. Widths come from the configured public header; see the
-[build reference](building.md) and [fork comparison](../FORK_CHANGES.md).
+internal helper returns a METIS status. Constructors and workspace/refinement
+helpers return status before an incomplete object is used. Affected graph and
+mesh entry points restore temporary numbering and leave caller-owned result
+pointers uncommitted on failure. Malformed input returns `METIS_ERROR_INPUT`,
+while an unrepresentable or failed allocation returns `METIS_ERROR_MEMORY`.
+Workspace callers check marker insertion and payload allocation before use;
+markerless pop leaves the preceding frame intact. Mesh partitioning also checks
+its node-element lists and row-induction arrays before assigning the induced
+partition.
+
+Graph and mesh validation checks representability where derived storage is
+allocated. METIS edge weights are positive, vertex weights and sizes are
+nonnegative, and CLI output is validated before a temporary output file is
+created. Full duplicate-edge and symmetry validation remains an input/debug
+tool responsibility rather than an added cost on every public partition call.
+
+Use `METIS_SetDefaultOptions` to initialize option arrays. Widths come from the
+configured public header; see the [build reference](building.md) and
+[fork comparison](../FORK_CHANGES.md).

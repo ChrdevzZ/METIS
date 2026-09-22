@@ -169,6 +169,22 @@ def normalize_crlf(content: bytes) -> bytes:
     return content.replace(b"\r\n", b"\n")
 
 
+def is_binary_content(content: bytes) -> bool:
+    if content.startswith(b"%PDF-") or b"\0" in content:
+        return True
+    try:
+        content.decode("utf-8")
+    except UnicodeDecodeError:
+        return True
+    return False
+
+
+def same_content(current: bytes, baseline: bytes) -> bool:
+    if is_binary_content(current) or is_binary_content(baseline):
+        return current == baseline
+    return normalize_crlf(current) == normalize_crlf(baseline)
+
+
 def newline_style(content: bytes) -> bytes:
     without_crlf = content.replace(b"\r\n", b"")
     if b"\r\n" in content and b"\n" not in without_crlf:
@@ -308,8 +324,8 @@ def validate_manifest(root: Path, data: Mapping[str, Any]) -> List[str]:
                 if not object_exists(root, baseline_blob):
                     errors.append("baseline blob is unavailable: " + baseline_blob)
                 else:
-                    equal = normalize_crlf(local_file.read_bytes()) == normalize_crlf(
-                        blob(root, baseline_blob)
+                    equal = same_content(
+                        local_file.read_bytes(), blob(root, baseline_blob)
                     )
                     if kind == "direct" and not equal:
                         errors.append("direct entry has local changes: " + local_path)
@@ -323,12 +339,16 @@ def validate_manifest(root: Path, data: Mapping[str, Any]) -> List[str]:
         errors.append("coverage must be an object")
     else:
         extensions = coverage.get("extensions", [])
+        all_upstream_blobs = coverage.get("all_upstream_blobs", False)
         required_paths = coverage.get("required_paths", [])
         if not isinstance(extensions, list) or not all(
             isinstance(value, str) and value.startswith(".") for value in extensions
         ):
             errors.append("coverage.extensions must contain suffix strings")
             extensions = []
+        if not isinstance(all_upstream_blobs, bool):
+            errors.append("coverage.all_upstream_blobs must be a boolean")
+            all_upstream_blobs = False
         if not isinstance(required_paths, list) or not all(
             isinstance(value, str) for value in required_paths
         ):
@@ -337,7 +357,8 @@ def validate_manifest(root: Path, data: Mapping[str, Any]) -> List[str]:
         wanted = {
             path
             for path, item in baseline_tree.items()
-            if item["type"] == "blob" and has_suffix(path, extensions)
+            if item["type"] == "blob"
+            and (all_upstream_blobs or has_suffix(path, extensions))
         }
         wanted.update(required_paths)
         missing_coverage = sorted(wanted - seen_upstream)
@@ -639,13 +660,14 @@ def prepared_manifest(
                 upstream_content = blob(repository, target_item["blob"])
                 entry["kind"] = (
                     "direct"
-                    if normalize_crlf(source) == normalize_crlf(upstream_content)
+                    if same_content(source, upstream_content)
                     else "modified"
                 )
         retained.append(entry)
 
     coverage = candidate.get("coverage", {})
     extensions = coverage.get("extensions", [])
+    all_upstream_blobs = coverage.get("all_upstream_blobs", False)
     required_path_list = [
         path for path in coverage.get("required_paths", []) if path in target_tree
     ]
@@ -654,7 +676,11 @@ def prepared_manifest(
     for upstream_path, target_item in sorted(target_tree.items()):
         if upstream_path in upstream_paths or target_item["type"] != "blob":
             continue
-        if upstream_path not in required_paths and not has_suffix(upstream_path, extensions):
+        if (
+            not all_upstream_blobs
+            and upstream_path not in required_paths
+            and not has_suffix(upstream_path, extensions)
+        ):
             continue
         stable_id = candidate_ids_by_path.get(
             upstream_path, candidate_id(None, upstream_path)
@@ -818,31 +844,35 @@ def prepare(root: Path, data: Mapping[str, Any], target: str, output: Path, fetc
         patch = b""
         artifact_files: List[str] = []
         current_present = False
-
-        if (
+        mergeable = (
             change["change"] == "modified"
             and change["old_type"] == "blob"
             and change["new_type"] == "blob"
             and change["old_mode"] == change["new_mode"]
             and entry
             and kind in ("direct", "modified")
-        ):
+        )
+        if mergeable:
             local_file = local_source_path(root, local_path)
-            if not local_file.is_file():
-                reason = "mapped local file is missing"
-            else:
+            mergeable = local_file.is_file()
+            if mergeable:
                 current = local_file.read_bytes()
                 base = blob(repository, change["old_blob"])
                 incoming = blob(repository, change["new_blob"])
-                proposed, conflicted = merge_candidate(current, base, incoming, directory)
-                artifact_files = ["current", "baseline", "upstream", "proposed"]
-                patch = unified_patch(current, proposed, "a/" + local_path, "b/" + local_path)
-                if conflicted:
-                    reason = "three-way merge contains conflicts"
-                else:
-                    disposition = "clean_merge"
-                    reason = "three-way merge completed without conflicts"
-                    proposed_sources[upstream_path] = proposed
+                mergeable = not any(
+                    is_binary_content(content) for content in (current, base, incoming)
+                )
+
+        if mergeable:
+            proposed, conflicted = merge_candidate(current, base, incoming, directory)
+            artifact_files = ["current", "baseline", "upstream", "proposed"]
+            patch = unified_patch(current, proposed, "a/" + local_path, "b/" + local_path)
+            if conflicted:
+                reason = "three-way merge contains conflicts"
+            else:
+                disposition = "clean_merge"
+                reason = "three-way merge completed without conflicts"
+                proposed_sources[upstream_path] = proposed
         else:
             directory.mkdir(parents=True, exist_ok=False)
             old_content = (
@@ -855,25 +885,46 @@ def prepare(root: Path, data: Mapping[str, Any], target: str, output: Path, fetc
                 if change["new_blob"] and change["new_type"] == "blob"
                 else b""
             )
-            if change["old_blob"]:
-                write_new(directory / "baseline", normalize_crlf(old_content))
-                artifact_files.append("baseline")
             if local_path:
                 local_file = local_source_path(root, local_path)
                 if local_file.is_file():
                     current = local_file.read_bytes()
                     current_present = True
-                    write_new(directory / "current", normalize_crlf(current))
-                    artifact_files.append("current")
                 else:
                     current = b""
             else:
                 current = b""
+            binary_content = any(
+                is_binary_content(content)
+                for content in (old_content, new_content, current)
+            )
+            if change["old_blob"]:
+                write_new(
+                    directory / "baseline",
+                    old_content if binary_content else normalize_crlf(old_content),
+                )
+                artifact_files.append("baseline")
+            if current_present:
+                write_new(
+                    directory / "current",
+                    current if binary_content else normalize_crlf(current),
+                )
+                artifact_files.append("current")
             if change["new_blob"]:
-                write_new(directory / "upstream", normalize_crlf(new_content))
+                write_new(
+                    directory / "upstream",
+                    new_content if binary_content else normalize_crlf(new_content),
+                )
                 artifact_files.append("upstream")
             patch_path = local_path or upstream_path
-            if change["change"] == "added":
+            if binary_content:
+                reason = (
+                    "binary content requires manual review; "
+                    "raw candidate artifacts are provided"
+                )
+            elif local_path and not current_present:
+                reason = "mapped local file is missing"
+            elif change["change"] == "added":
                 patch = unified_patch(b"", new_content, "/dev/null", "b/" + patch_path)
                 candidates = rename_by_destination.get(upstream_path, [])
                 reason = "possible rename requires review" if candidates else "upstream addition requires review"
@@ -916,9 +967,6 @@ def prepare(root: Path, data: Mapping[str, Any], target: str, output: Path, fetc
                 and change["old_mode"] != change["new_mode"]
             ):
                 reason = "Git mode change requires manual review"
-            elif b"\0" in old_content or b"\0" in new_content:
-                patch = b""
-                reason += "; binary content is provided as raw candidate artifacts"
 
         patch_name: Optional[str] = None
         if patch:
@@ -1021,8 +1069,8 @@ def refreshed_manifest(root: Path, data: Mapping[str, Any]) -> Dict[str, Any]:
             local_file = local_source_path(root, local_path)
             if not local_file.is_file():
                 raise UpstreamError("cannot refresh missing local file: " + local_path)
-            same = normalize_crlf(local_file.read_bytes()) == normalize_crlf(
-                blob(root, entry["baseline_blob"])
+            same = same_content(
+                local_file.read_bytes(), blob(root, entry["baseline_blob"])
             )
             entry["kind"] = "direct" if same else "modified"
     coverage = refreshed.get("coverage", {})

@@ -42,13 +42,16 @@ idx_t ComputeCut(graph_t *graph, idx_t *where)
 
 
 /*************************************************************************/
-/*! This function computes the total volume 
+/*! This function computes the total volume.
+
+    \returns -1 if the marker array cannot be allocated.
  */
 /*************************************************************************/
 idx_t ComputeVolume(graph_t *graph, idx_t *where)
 {
-  idx_t i, j, k, me, nvtxs, nparts, totalv;
+  idx_t i, j, k, nvtxs, nparts, totalv;
   idx_t *xadj, *adjncy, *vsize, *marker;
+  int sigrval;
 
 
   nvtxs  = graph->nvtxs;
@@ -56,8 +59,14 @@ idx_t ComputeVolume(graph_t *graph, idx_t *where)
   adjncy = graph->adjncy;
   vsize  = graph->vsize;
 
+  if (nvtxs == 0)
+    return 0;
+
   nparts = where[iargmax(nvtxs, where,1)]+1;
-  marker = ismalloc(nparts, -1, "ComputeVolume: marker");
+  marker = iMallocNoSignal((size_t)nparts, "ComputeVolume: marker", &sigrval);
+  if (marker == NULL)
+    return -1;
+  iset(nparts, -1, marker);
 
   totalv = 0;
 
@@ -79,15 +88,26 @@ idx_t ComputeVolume(graph_t *graph, idx_t *where)
 
 
 /*************************************************************************/
-/*! This function computes the cut given the graph and a where vector 
+/*! This function computes the cut given the graph and a where vector.
+
+    \returns -1 if the cut array cannot be allocated.
  */
 /*************************************************************************/
 idx_t ComputeMaxCut(graph_t *graph, idx_t nparts, idx_t *where)
 {
   idx_t i, j, maxcut;
   idx_t *cuts;
+  int sigrval;
 
-  cuts = ismalloc(nparts, 0, "ComputeMaxCut: cuts");
+  if (nparts <= 0) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  cuts = iMallocNoSignal((size_t)nparts, "ComputeMaxCut: cuts", &sigrval);
+  if (cuts == NULL)
+    return -1;
+  iset(nparts, 0, cuts);
 
   if (graph->adjwgt == NULL) {
     for (i=0; i<graph->nvtxs; i++) {
@@ -346,7 +366,8 @@ void CheckKWayVolPartitionParams(ctrl_t *ctrl, graph_t *graph)
   vkrinfo_t *rinfo, *myrinfo, *orinfo, tmprinfo;
   vnbr_t *mynbrs, *onbrs, *tmpnbrs;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -356,6 +377,11 @@ void CheckKWayVolPartitionParams(ctrl_t *ctrl, graph_t *graph)
   rinfo  = graph->vkrinfo;
 
   tmpnbrs = (vnbr_t *)wspacemalloc(ctrl, ctrl->nparts*sizeof(vnbr_t));
+  if (tmpnbrs == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
   /*------------------------------------------------------------
   / Compute now the iv/ev degrees

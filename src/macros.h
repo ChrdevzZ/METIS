@@ -110,6 +110,8 @@
        myrinfo->inbr  = cnbrpoolGetNext(ctrl, adjlen); \
        myrinfo->nnbrs = 0; \
      } \
+     if (myrinfo->inbr == -1) \
+       return; \
      ASSERT(CheckRInfo(ctrl, myrinfo)); \
      \
      mynbrs = ctrl->cnbrpool + myrinfo->inbr; \

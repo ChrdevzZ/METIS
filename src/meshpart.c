@@ -13,6 +13,7 @@
  */
 
 #include "metislib.h"
+#include "input_validation.h"
 
 
 /*************************************************************************
@@ -23,22 +24,50 @@ int METIS_PartMeshNodal(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
           idx_t *vwgt, idx_t *vsize, idx_t *nparts, real_t *tpwgts, 
           idx_t *options, idx_t *objval, idx_t *epart, idx_t *npart)
 {
-  int sigrval=0, renumber=0, ptype;
-  idx_t *xadj=NULL, *adjncy=NULL;
+  volatile int sigrval=0, renumber=0, ptype;
+  int error, sigrval2;
+  idx_t new_objval;
+  idx_t *cleanup_npart;
+  idx_t * volatile xadj=NULL;
+  idx_t * volatile adjncy=NULL;
+  idx_t * volatile new_npart=NULL;
   idx_t ncon=1, pnumflag=0;
-  int rstatus=METIS_OK;
+  volatile idx_t numflag;
+  volatile int rstatus=METIS_OK;
+
+  if (ne == NULL || nn == NULL || nparts == NULL || objval == NULL ||
+      epart == NULL || npart == NULL)
+    return METIS_ERROR_INPUT;
+  numflag = GETOPTION(options, METIS_OPTION_NUMBERING, 0);
+  ptype = GETOPTION(options, METIS_OPTION_PTYPE, METIS_PTYPE_KWAY);
+  if (*nparts <= 0 ||
+      (ptype != METIS_PTYPE_KWAY && ptype != METIS_PTYPE_RB))
+    return METIS_ERROR_INPUT;
+  rstatus = ValidateMeshInput(*ne, *nn, eptr, eind, numflag);
+  if (rstatus != METIS_OK)
+    return rstatus;
+  if (!ValidateIntegerWeights(*nn, vwgt) ||
+      !ValidateIntegerWeights(*nn, vsize))
+    return METIS_ERROR_INPUT;
 
   /* set up malloc cleaning code and signal catchers */
-  if (!gk_malloc_init()) 
+  if (!gk_malloc_init()) {
+    if (errno == 0)
+      errno = ENOMEM;
     return METIS_ERROR_MEMORY;
+  }
 
-  gk_sigtrap();
+  if (!gk_sigtrap()) {
+    gk_malloc_cleanup(0);
+    errno = ENOMEM;
+    return METIS_ERROR_MEMORY;
+  }
 
-  if ((sigrval = gk_sigcatch()) != 0) 
+  METIS_SIGCATCH(sigrval);
+  if (sigrval != 0)
     goto SIGTHROW;
 
-  renumber = GETOPTION(options, METIS_OPTION_NUMBERING, 0);
-  ptype    = GETOPTION(options, METIS_OPTION_PTYPE, METIS_PTYPE_KWAY);
+  renumber = numflag;
 
   /* renumber the mesh */
   if (renumber) {
@@ -47,38 +76,71 @@ int METIS_PartMeshNodal(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   }
 
   /* get the nodal graph */
-  rstatus = METIS_MeshToNodal(ne, nn, eptr, eind, &pnumflag, &xadj, &adjncy);
+  rstatus = METIS_MeshToNodal(ne, nn, eptr, eind, &pnumflag,
+      (idx_t **)&xadj, (idx_t **)&adjncy);
   if (rstatus != METIS_OK)
-    raise(SIGERR);
+    goto SIGTHROW;
+
+  new_npart = iMallocNoSignal((size_t)*nn, "METIS_PartMeshNodal: npart",
+      &sigrval2);
+  if (new_npart == NULL) {
+    rstatus = METIS_ERROR_MEMORY;
+    goto SIGTHROW;
+  }
 
   /* partition the graph */
   if (ptype == METIS_PTYPE_KWAY) 
-    rstatus = METIS_PartGraphKway(nn, &ncon, xadj, adjncy, vwgt, vsize, NULL, 
-                  nparts, tpwgts, NULL, options, objval, npart);
+    rstatus = METIS_PartGraphKway(nn, &ncon, (idx_t *)xadj,
+                  (idx_t *)adjncy, vwgt, vsize, NULL,
+                  nparts, tpwgts, NULL, options, &new_objval,
+                  (idx_t *)new_npart);
   else 
-    rstatus = METIS_PartGraphRecursive(nn, &ncon, xadj, adjncy, vwgt, vsize, NULL, 
-                  nparts, tpwgts, NULL, options, objval, npart);
+    rstatus = METIS_PartGraphRecursive(nn, &ncon, (idx_t *)xadj,
+                  (idx_t *)adjncy, vwgt, vsize, NULL,
+                  nparts, tpwgts, NULL, options, &new_objval,
+                  (idx_t *)new_npart);
 
   if (rstatus != METIS_OK)
-    raise(SIGERR);
+    goto SIGTHROW;
 
   /* partition the other side of the mesh */
-  InduceRowPartFromColumnPart(*ne, eptr, eind, epart, npart, *nparts, tpwgts);
+  rstatus = InduceRowPartFromColumnPart(*ne, eptr, eind, epart,
+      (idx_t *)new_npart, *nparts, tpwgts);
+  if (rstatus != METIS_OK)
+    goto SIGTHROW;
 
 
 SIGTHROW:
+  error = errno;
+  if (error == 0 && (sigrval != 0 || rstatus != METIS_OK))
+    error = sigrval == SIGMEM || rstatus == METIS_ERROR_MEMORY ?
+        ENOMEM : EINVAL;
+
   if (renumber) {
-    ChangeMesh2FNumbering2(*ne, *nn, eptr, eind, epart, npart);
+    ChangeMesh2FNumbering2(*ne, *nn, eptr, eind,
+        sigrval == 0 && rstatus == METIS_OK ? epart : NULL,
+        sigrval == 0 && rstatus == METIS_OK ? (idx_t *)new_npart : NULL);
     options[METIS_OPTION_NUMBERING] = 1;
   }
 
-  METIS_Free(xadj);
-  METIS_Free(adjncy);
+  if (sigrval == 0 && rstatus == METIS_OK) {
+    icopy(*nn, (idx_t *)new_npart, npart);
+    *objval = new_objval;
+  }
+
+  cleanup_npart = (idx_t *)new_npart;
+  gk_free((void **)&cleanup_npart, LTERM);
+
+  METIS_Free((idx_t *)xadj);
+  METIS_Free((idx_t *)adjncy);
 
   gk_siguntrap();
   gk_malloc_cleanup(0);
 
-  return metis_rcode(sigrval);
+  if (sigrval != 0 || rstatus != METIS_OK)
+    errno = error;
+
+  return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }
 
 
@@ -92,23 +154,52 @@ int METIS_PartMeshDual(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
           real_t *tpwgts, idx_t *options, idx_t *objval, idx_t *epart, 
           idx_t *npart) 
 {
-  int sigrval=0, renumber=0, ptype;
+  volatile int sigrval=0, renumber=0, ptype;
+  int error, sigrval2;
+  idx_t new_objval;
+  idx_t *cleanup_epart;
   idx_t i, j;
-  idx_t *xadj=NULL, *adjncy=NULL, *nptr=NULL, *nind=NULL;
+  idx_t * volatile xadj=NULL;
+  idx_t * volatile adjncy=NULL;
+  idx_t * volatile new_epart=NULL;
+  idx_t *nptr=NULL, *nind=NULL;
   idx_t ncon=1, pnumflag=0;
-  int rstatus = METIS_OK;
+  volatile idx_t numflag;
+  volatile int rstatus=METIS_OK;
+
+  if (ne == NULL || nn == NULL || ncommon == NULL || nparts == NULL ||
+      objval == NULL || epart == NULL || npart == NULL)
+    return METIS_ERROR_INPUT;
+  numflag = GETOPTION(options, METIS_OPTION_NUMBERING, 0);
+  ptype = GETOPTION(options, METIS_OPTION_PTYPE, METIS_PTYPE_KWAY);
+  if (*nparts <= 0 ||
+      (ptype != METIS_PTYPE_KWAY && ptype != METIS_PTYPE_RB))
+    return METIS_ERROR_INPUT;
+  rstatus = ValidateMeshInput(*ne, *nn, eptr, eind, numflag);
+  if (rstatus != METIS_OK)
+    return rstatus;
+  if (!ValidateIntegerWeights(*ne, vwgt) ||
+      !ValidateIntegerWeights(*ne, vsize))
+    return METIS_ERROR_INPUT;
 
   /* set up malloc cleaning code and signal catchers */
-  if (!gk_malloc_init()) 
+  if (!gk_malloc_init()) {
+    if (errno == 0)
+      errno = ENOMEM;
     return METIS_ERROR_MEMORY;
+  }
 
-  gk_sigtrap();
+  if (!gk_sigtrap()) {
+    gk_malloc_cleanup(0);
+    errno = ENOMEM;
+    return METIS_ERROR_MEMORY;
+  }
 
-  if ((sigrval = gk_sigcatch()) != 0) 
+  METIS_SIGCATCH(sigrval);
+  if (sigrval != 0)
     goto SIGTHROW;
 
-  renumber = GETOPTION(options, METIS_OPTION_NUMBERING, 0);
-  ptype    = GETOPTION(options, METIS_OPTION_PTYPE, METIS_PTYPE_KWAY);
+  renumber = numflag;
 
   /* renumber the mesh */
   if (renumber) {
@@ -117,25 +208,48 @@ int METIS_PartMeshDual(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   }
 
   /* get the dual graph */
-  rstatus = METIS_MeshToDual(ne, nn, eptr, eind, ncommon, &pnumflag, &xadj, &adjncy);
+  rstatus = METIS_MeshToDual(ne, nn, eptr, eind, ncommon, &pnumflag,
+      (idx_t **)&xadj, (idx_t **)&adjncy);
   if (rstatus != METIS_OK)
-    raise(SIGERR);
+    goto SIGTHROW;
+
+  new_epart = iMallocNoSignal((size_t)*ne, "METIS_PartMeshDual: epart",
+      &sigrval2);
+  if (new_epart == NULL) {
+    rstatus = METIS_ERROR_MEMORY;
+    goto SIGTHROW;
+  }
 
   /* partition the graph */
   if (ptype == METIS_PTYPE_KWAY) 
-    rstatus = METIS_PartGraphKway(ne, &ncon, xadj, adjncy, vwgt, vsize, NULL, 
-                  nparts, tpwgts, NULL, options, objval, epart);
+    rstatus = METIS_PartGraphKway(ne, &ncon, (idx_t *)xadj,
+                  (idx_t *)adjncy, vwgt, vsize, NULL,
+                  nparts, tpwgts, NULL, options, &new_objval,
+                  (idx_t *)new_epart);
   else 
-    rstatus = METIS_PartGraphRecursive(ne, &ncon, xadj, adjncy, vwgt, vsize, NULL, 
-                  nparts, tpwgts, NULL, options, objval, epart);
+    rstatus = METIS_PartGraphRecursive(ne, &ncon, (idx_t *)xadj,
+                  (idx_t *)adjncy, vwgt, vsize, NULL,
+                  nparts, tpwgts, NULL, options, &new_objval,
+                  (idx_t *)new_epart);
 
   if (rstatus != METIS_OK)
-    raise(SIGERR);
+    goto SIGTHROW;
 
 
   /* construct the node-element list */
-  nptr = ismalloc(*nn+1, 0, "METIS_PartMeshDual: nptr");
-  nind = imalloc(eptr[*ne], "METIS_PartMeshDual: nind");
+  nptr = iMallocNoSignal((size_t)*nn+1, "METIS_PartMeshDual: nptr",
+      &sigrval2);
+  if (nptr == NULL) {
+    rstatus = METIS_ERROR_MEMORY;
+    goto SIGTHROW;
+  }
+  iset(*nn+1, 0, nptr);
+  nind = iMallocNoSignal((size_t)eptr[*ne], "METIS_PartMeshDual: nind",
+      &sigrval2);
+  if (nind == NULL) {
+    rstatus = METIS_ERROR_MEMORY;
+    goto SIGTHROW;
+  }
 
   for (i=0; i<*ne; i++) {
     for (j=eptr[i]; j<eptr[i+1]; j++)
@@ -150,24 +264,45 @@ int METIS_PartMeshDual(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   SHIFTCSR(i, *nn, nptr);
 
   /* partition the other side of the mesh */
-  InduceRowPartFromColumnPart(*nn, nptr, nind, npart, epart, *nparts, tpwgts);
-
-  gk_free((void **)&nptr, &nind, LTERM);
+  rstatus = InduceRowPartFromColumnPart(*nn, nptr, nind, npart,
+      (idx_t *)new_epart, *nparts, tpwgts);
+  if (rstatus != METIS_OK)
+    goto SIGTHROW;
 
 
 SIGTHROW:
+  error = errno;
+  if (error == 0 && (sigrval != 0 || rstatus != METIS_OK))
+    error = sigrval == SIGMEM || rstatus == METIS_ERROR_MEMORY ?
+        ENOMEM : EINVAL;
+
+  gk_free((void **)&nptr, &nind, LTERM);
+
   if (renumber) {
-    ChangeMesh2FNumbering2(*ne, *nn, eptr, eind, epart, npart);
+    ChangeMesh2FNumbering2(*ne, *nn, eptr, eind,
+        sigrval == 0 && rstatus == METIS_OK ? (idx_t *)new_epart : NULL,
+        sigrval == 0 && rstatus == METIS_OK ? npart : NULL);
     options[METIS_OPTION_NUMBERING] = 1;
   }
 
-  METIS_Free(xadj);
-  METIS_Free(adjncy);
+  if (sigrval == 0 && rstatus == METIS_OK) {
+    icopy(*ne, (idx_t *)new_epart, epart);
+    *objval = new_objval;
+  }
+
+  cleanup_epart = (idx_t *)new_epart;
+  gk_free((void **)&cleanup_epart, LTERM);
+
+  METIS_Free((idx_t *)xadj);
+  METIS_Free((idx_t *)adjncy);
 
   gk_siguntrap();
   gk_malloc_cleanup(0);
 
-  return metis_rcode(sigrval);
+  if (sigrval != 0 || rstatus != METIS_OK)
+    errno = error;
+
+  return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }
 
 
@@ -176,22 +311,43 @@ SIGTHROW:
 /*! Induces a partitioning of the rows based on a a partitioning of the
     columns. It is used by both the Nodal and Dual routines. */
 /*************************************************************************/
-void InduceRowPartFromColumnPart(idx_t nrows, idx_t *rowptr, idx_t *rowind,
+int InduceRowPartFromColumnPart(idx_t nrows, idx_t *rowptr, idx_t *rowind,
          idx_t *rpart, idx_t *cpart, idx_t nparts, real_t *tpwgts)
 {
-  idx_t i, j, k, me;
-  idx_t nnbrs, *pwgts, *nbrdom, *nbrwgt, *nbrmrk;
-  idx_t *itpwgts;
+  idx_t i, j, me;
+  idx_t nnbrs, *pwgts=NULL, *nbrdom=NULL, *nbrwgt=NULL, *nbrmrk=NULL;
+  idx_t *itpwgts=NULL;
+  int error, sigrval;
 
-  pwgts  = ismalloc(nparts, 0, "InduceRowPartFromColumnPart: pwgts");
-  nbrdom = ismalloc(nparts, 0, "InduceRowPartFromColumnPart: nbrdom");
-  nbrwgt = ismalloc(nparts, 0, "InduceRowPartFromColumnPart: nbrwgt");
-  nbrmrk = ismalloc(nparts, -1, "InduceRowPartFromColumnPart: nbrmrk");
+  pwgts = iMallocNoSignal((size_t)nparts,
+      "InduceRowPartFromColumnPart: pwgts", &sigrval);
+  if (pwgts == NULL)
+    goto MEMORY_ERROR;
+  nbrdom = iMallocNoSignal((size_t)nparts,
+      "InduceRowPartFromColumnPart: nbrdom", &sigrval);
+  if (nbrdom == NULL)
+    goto MEMORY_ERROR;
+  nbrwgt = iMallocNoSignal((size_t)nparts,
+      "InduceRowPartFromColumnPart: nbrwgt", &sigrval);
+  if (nbrwgt == NULL)
+    goto MEMORY_ERROR;
+  nbrmrk = iMallocNoSignal((size_t)nparts,
+      "InduceRowPartFromColumnPart: nbrmrk", &sigrval);
+  if (nbrmrk == NULL)
+    goto MEMORY_ERROR;
+  itpwgts = iMallocNoSignal((size_t)nparts,
+      "InduceRowPartFromColumnPart: itpwgts", &sigrval);
+  if (itpwgts == NULL)
+    goto MEMORY_ERROR;
+
+  iset(nparts, 0, pwgts);
+  iset(nparts, 0, nbrdom);
+  iset(nparts, 0, nbrwgt);
+  iset(nparts, -1, nbrmrk);
 
   iset(nrows, -1, rpart);
 
   /* setup the integer target partition weights */
-  itpwgts = imalloc(nparts, "InduceRowPartFromColumnPart: itpwgts");
   if (tpwgts == NULL) {
     iset(nparts, 1+nrows/nparts, itpwgts);
   }
@@ -258,5 +414,11 @@ void InduceRowPartFromColumnPart(idx_t nrows, idx_t *rowptr, idx_t *rowind,
   }
 
   gk_free((void **)&pwgts, &nbrdom, &nbrwgt, &nbrmrk, &itpwgts, LTERM);
+  return METIS_OK;
 
+MEMORY_ERROR:
+  error = errno == 0 ? ENOMEM : errno;
+  gk_free((void **)&pwgts, &nbrdom, &nbrwgt, &nbrmrk, &itpwgts, LTERM);
+  errno = error;
+  return METIS_ERROR_MEMORY;
 }

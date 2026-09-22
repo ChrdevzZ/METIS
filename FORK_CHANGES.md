@@ -90,6 +90,24 @@ reallocation fails, and preserves current records and caller handles when an
 active marker rejects a free or mcore cleanup. Deterministic fault injection
 covers these boundaries. See the [GKlib development checks](ext/GKlib/docs/development.md).
 
+METIS private constructors and workspace allocation propagate status before an
+incomplete object reaches an algorithm. Affected public graph and mesh entry
+points restore temporary numbering on every exit and classify malformed input
+separately from an unrepresentable or unavailable allocation. Checked `size_t`
+calculations are performed where derived storage is needed; legal CSR input is
+not rejected by a blanket half-range limit.
+
+Workspace frames are checked before their payloads are used. A failed marker
+push leaves the previous frame intact, and a pop without a marker does not
+release the preceding frame. Mesh partitioning checks node-element and row
+induction work arrays before changing the induced partition. Minimum-cover
+construction commits its cover only after all matching and decomposition work
+arrays have been allocated. Initial node bisection likewise commits the shared
+edge and node refinement fields only after all seven arrays are available.
+K-way refinement preserves its previous cut or volume state across every failed
+allocation, including nested `SIGMEM` recovery, and replaces the volume-mode
+cut-info alias without freeing the same array twice.
+
 Static OpenMP-enabled GKlib packages retain the producer runtime by recorded
 library name instead of imposing C or C++ OpenMP discovery on the consumer.
 This permits pure Fortran package consumption when a compatible producer SDK is
@@ -126,10 +144,18 @@ covered separately by the mapping and build documentation.
 | `libmetis/gklib_defs.h`, `libmetis/proto.h` | `src/gklib_defs.h`, `src/proto.h` | Declare METIS-owned template instances and internal entry points with METIS export attributes so DLL tools can link. |
 | `libmetis/metislib.h` | `src/metislib.h` | Make METIS template instances follow METIS assertion policy. |
 | `programs/metisbin.h` | `apps/metisbin.h` | Use the private library include interface instead of cross-directory legacy paths; remove the dummy function-name override. |
-| `programs/io.c` | `apps/io.c` | Allocate output filename buffers from input length and free them, avoiding oversized Windows stack arrays and fixed-size filename storage. Parse target-weight indices at the configured width and reject overflow, inverted ranges, non-finite weights, and trailing input. |
-| `programs/stat.c` | `apps/stat.c` | Correct the stale source-file name in the retained documentation comment. |
-| `programs/gpmetis.c`, `programs/mpmetis.c`, `programs/ndmetis.c` | Corresponding files in `apps/` | Restrict Linux-specific resource reporting to Linux instead of assuming every non-macOS system supports it. |
-| `libmetis/parmetis.c`, `libmetis/sfm.c` | `src/parmetis.c`, `src/sfm.c` | Keep MOVEINFO diagnostics valid when only one move candidate exists: capture its gain before queue updates and print the absent opposite candidate without indexing through its sentinel. In `parmetis.c`, use width-matched `iabs` for node-refinement balance comparisons; 64-bit weight differences must not narrow to C `int`. |
+| `programs/io.c` | `apps/io.c` | Allocate output filename buffers from input length and free them, avoiding oversized Windows stack arrays and fixed-size filename storage. Parse graph and mesh input from one open stream, return explicit read/write status, validate output before creating a temporary file, and preserve the first write, flush, close or commit error. Target-weight parsing rejects overflow, inverted ranges, non-finite weights, trailing input, and incomplete distributions whose specified sum is already one. |
+| `programs/stat.c` | `apps/stat.c` | Correct the stale source-file name and return allocation failures from objective and post-partition statistics after cleaning partial work arrays. Result statistics are emitted only after every fallible calculation and allocation succeeds, so a failed report produces no partial success output. |
+| `programs/gpmetis.c`, `programs/mpmetis.c`, `programs/ndmetis.c`, `programs/m2gmetis.c`, `programs/graphchk.c`, `programs/cmpfillin.c` | Corresponding files in `apps/` | Propagate input, library, result-reporting and output failures to a nonzero process status and print success statistics only after every required step succeeds. Ordering tools retain full 64-bit symbolic-factor statistics on 32-bit hosts. Resource reporting remains restricted to platforms that provide it. |
+| `libmetis/checkgraph.c`, local `src/input_validation.h` | `src/checkgraph.c`, local header | Validate CSR structure and weight domains with checked dimension conversions. METIS edge weights must be positive; vertex weights and sizes may be zero. The checks do not add a full release-build topology sort to every partition entry point. |
+| `libmetis/graph.c`, `libmetis/options.c` | `src/graph.c`, `src/options.c` | Build graph/control state in temporary storage, reject failed construction before use, and keep caller-visible state unchanged on failure. Graph repair handles inputs containing only self-loops without reading an empty candidate list. |
+| `libmetis/wspace.c`, `libmetis/coarsen.c`, `libmetis/contig.c`, `libmetis/debug.c`, `libmetis/mcutil.c`, `libmetis/kwayfm.c`, `libmetis/minconn.c` | Corresponding files in `src/` | Check derived workspace and coarse-graph sizes, marker insertion, matching-sort workspace, connectivity work arrays and neighbor-pool exhaustion before indexing, and propagate memory status through refinement instead of continuing with a sentinel or partial workspace. Matching, vector AXPY and weak-connection comparisons remain exact at the index limit. Empty induced vertex sets return zero components, and a pop without a marker preserves the prior frame. Preserve the existing mcore alignment and exact-fit behavior. |
+| `libmetis/mincover.c`, `libmetis/separator.c` | `src/mincover.c`, `src/separator.c` | Allocate matching and decomposition work arrays before committing a minimum cover, and preserve the graph partition when construction fails. |
+| `libmetis/kmetis.c`, `libmetis/pmetis.c`, `libmetis/ometis.c`, `libmetis/parmetis.c` | Corresponding files in `src/` | Check construction, workspace and algorithm status at each public entry point, restore 1-based input numbering on every failure path, and retain legal-input partition behavior. The experimental block partitioner uses vertex weights, supplies distinct seeds for low-degree graphs, and is selected only for its single-constraint implementation. Minimum degree ordering rejects an unrepresentable workspace length before changing its private graph numbering. MOVEINFO diagnostics remain valid with one candidate, and node-refinement balance arithmetic keeps the configured index width. |
+| `libmetis/rename.h` | `src/rename.h` | Keep fork-added non-static helpers in the existing `libmetis__` internal namespace. The complete archive audit covers `CoarsenGraphNlevels`, `ComputeBFSOrdering`, `GrowBisectionNode2`, `BlockKWayPartitioning`, `GrowMultisection`, `BalanceAndRefineLP`, `Greedy_KWayEdgeCutOptimize`, `Greedy_KWayEdgeStats`, and `graph_CleanupDiskFiles`. |
+| `libmetis/mesh.c`, `libmetis/meshpart.c`, `libmetis/auxapi.c` | Corresponding files in `src/` | Check mesh-derived capacities, node-element lists, row-induction work arrays and caller-owned result allocation before commit. Mesh partitioning keeps both caller partition arrays and the objective unchanged when a later allocation fails. `METIS_MeshToDual` and `METIS_MeshToNodal` return both result pointers as null when allocation fails, restore one-based input after each failed constructor allocation, and preserve the first error code through cleanup. |
+| `libmetis/balance.c`, `libmetis/fm.c`, `libmetis/sfm.c` | `src/balance.c`, `src/fm.c`, `src/sfm.c` | Preserve refinement decisions at the index limit with exact quotient/remainder balance comparisons, bounded capped heuristics, paired one-sided iterations, and saturated nonnegative real thresholds. Compute doubled vertex counts with checked unsigned arithmetic before allocating storage. |
+| `programs/smbfactor.c` | `apps/smbfactor.c` | Validate CSR and permutation arrays before temporary relabeling, and compute symbolic-factor workspace sizes with checked unsigned arithmetic before narrowing to an index or allocating storage. Return both fill statistics in a fixed 64-bit type and accumulate the operation count with checked arithmetic independent of pointer width. Grow compressed-subscript storage with checked doubling and check append capacity before index addition. Preserve the upstream one-based algorithm through in-bounds indices instead of forming pointers before their arrays, including empty and edgeless matrices. |
 
 ## Installation, compatibility and validation
 
@@ -186,8 +212,9 @@ contents.
 
 ## Maintenance and history
 
-The [file mapping](upstream/files.json) is the machine-readable record of
-upstream/local paths, accepted blobs, templates and intentional deletions.
+The [file mapping](upstream/files.json) is the machine-readable record of every
+accepted upstream file, its local path, accepted blob, template treatment or
+intentional deletion.
 Generated headers are build products, not upstream source baselines. See
 [upstream tracking](docs/upstream.md) for read-only comparison and candidate
 patch generation. Ordinary builds do not require Python or Git.
@@ -210,6 +237,8 @@ Do not automatically restore intentionally removed build files.
   installation packages and explicit developer checks.
 - Remove obsolete in-place source rewrite scripts while retaining and mapping
   the non-mutating internal-symbol prefix audit helper.
+- Index every accepted upstream file, including documentation, data and binary
+  files, so future additions and changes require an explicit mapping decision.
 - Archive the June 2026 performance review and measurements, and document the
   current CMake-based reference, verification, case-set and binary-tree output
   workflow separately.
@@ -228,6 +257,16 @@ Do not automatically restore intentionally removed build files.
   symmetric graph fixtures and independently recompute partition edge cuts.
 - Reject malformed target-weight ranges and keep MOVEINFO-only diagnostics
   within valid candidate bounds, with focused command-line regressions.
+- Propagate constructor, workspace, neighbor-pool, graph/mesh read and output
+  failures through the affected public APIs and command-line programs. Restore
+  numbering and caller-owned outputs where those APIs temporarily modify or
+  allocate them, and distinguish input from memory status without changing the
+  public ABI.
+- Validate derived allocation sizes where they are used, reject nonpositive
+  METIS edge weights, and repair pure self-loop graphs without reading an empty
+  candidate list. Keep legal partition results and existing topology contracts.
+- Restore on-disk graphs on POSIX systems without `O_NOFOLLOW` by checking the
+  file before and after opening it, while retaining regular-file validation.
 - Preserve toolchain inputs and the selected configuration in nested tests;
   distinguish emulator execution from compile/link-only cross checks.
 - Share minimal package and sanitizer consumer sources, and use one

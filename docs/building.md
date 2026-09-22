@@ -355,9 +355,12 @@ only after embedding the sanitized C library.
 API tests validate graph symmetry, independently recompute partition edge cuts
 and compare mesh adjacency sets without requiring one neighbor order. The export
 regression checks both unchanged reconfiguration and automatic regeneration when
-the independent symbol baseline changes. Program regressions reject overflowing
-or inverted target-weight ranges, non-finite values and trailing input, and
-exercise MOVEINFO diagnostics when only one queue has a move candidate.
+the independent symbol baseline changes. Program and API regressions reject
+overflowing or inverted target-weight ranges, incomplete distributions whose
+specified sum already reaches one, non-finite values, nonpositive edge weights
+and trailing input. They also cover pure self-loop repair,
+constructor/workspace failure, numbering restoration, transactional output and
+MOVEINFO diagnostics with one move candidate.
 
 `upstream/files.json` records every source/header relationship to the official
 upstream revision, including moved files, generated-header templates, and

@@ -21,41 +21,63 @@
 /*************************************************************************/
 int main(int argc, char *argv[])
 {
-  idx_t i;
+  idx_t i, connected;
   char *curptr, *newptr;
   idx_t options[METIS_NOPTIONS];
-  graph_t *graph;
-  idx_t *part;
+  graph_t *graph=NULL;
+  idx_t *part=NULL;
   idx_t objval;
   params_t *params;
-  int status=0;
+  int malloc_initialized=0, status=METIS_OK;
 
   params = parse_cmdline(argc, argv);
 
   gk_startcputimer(params->iotimer);
-  graph = ReadGraph(params);
-
-  ReadTPwgts(params, graph->ncon);
+  status = ReadGraph(params, &graph);
+  if (status != METIS_OK)
+    goto cleanup;
+  status = ReadTPwgts(params, graph->ncon);
+  if (status != METIS_OK)
+    goto cleanup;
   gk_stopcputimer(params->iotimer);
 
   /* Check if the graph is contiguous */
-  if (params->contig && !IsConnected(graph, 0)) {
-    printf("***The input graph is not contiguous.\n"
-           "***The specified -contig option will be ignored.\n");
-    params->contig = 0;
+  if (params->contig) {
+    connected = IsConnected(graph, 0);
+    if (connected < 0) {
+      status = METIS_ERROR_MEMORY;
+      goto cleanup;
+    }
+    if (!connected) {
+      printf("***The input graph is not contiguous.\n"
+             "***The specified -contig option will be ignored.\n");
+      params->contig = 0;
+    }
   }
 
   /* Get ubvec if supplied */
   if (params->ubvecstr) {
     params->ubvec = rmalloc(graph->ncon, "main");
+    if (params->ubvec == NULL) {
+      status = METIS_ERROR_MEMORY;
+      goto cleanup;
+    }
     curptr = params->ubvecstr;
     for (i=0; i<graph->ncon; i++) {
+      errno = 0;
       params->ubvec[i] = strtoreal(curptr, &newptr);
-      if (curptr == newptr)
+      if (curptr == newptr || errno == ERANGE || !isfinite(params->ubvec[i]))
         errexit("Error parsing entry #%"PRIDX" of ubvec [%s] (possibly missing).\n", 
             i, params->ubvecstr);
+      if (i+1 < graph->ncon && !isspace((unsigned char)*newptr))
+        errexit("Entries in ubvec [%s] must be separated by whitespace.\n",
+            params->ubvecstr);
       curptr = newptr;
     }
+    while (isspace((unsigned char)*curptr))
+      curptr++;
+    if (*curptr != '\0')
+      errexit("Trailing characters in ubvec [%s].\n", params->ubvecstr);
   }
 
   /* Setup iptype */
@@ -71,8 +93,14 @@ int main(int argc, char *argv[])
   GPPrintInfo(params, graph);
 
   part = imalloc(graph->nvtxs, "main: part");
+  if (part == NULL) {
+    status = METIS_ERROR_MEMORY;
+    goto cleanup;
+  }
 
-  METIS_SetDefaultOptions(options);
+  status = METIS_SetDefaultOptions(options);
+  if (status != METIS_OK)
+    goto cleanup;
   options[METIS_OPTION_OBJTYPE]   = params->objtype;
   options[METIS_OPTION_CTYPE]     = params->ctype;
   options[METIS_OPTION_IPTYPE]    = params->iptype;
@@ -89,7 +117,11 @@ int main(int argc, char *argv[])
   options[METIS_OPTION_UFACTOR]   = params->ufactor;
   options[METIS_OPTION_DBGLVL]    = params->dbglvl;
 
-  gk_malloc_init();
+  if (!gk_malloc_init()) {
+    status = METIS_ERROR_MEMORY;
+    goto cleanup;
+  }
+  malloc_initialized = 1;
   gk_startcputimer(params->parttimer);
 
   switch (params->ptype) {
@@ -115,9 +147,13 @@ int main(int argc, char *argv[])
     printf("***It seems that Metis did not free all of its memory! Report this.\n");
   params->maxmemory = gk_GetMaxMemoryUsed();
   gk_malloc_cleanup(0);
+  malloc_initialized = 0;
 
-  if (graph->adjwgt == NULL)
+  if (status == METIS_OK && graph->nedges > 0 && graph->adjwgt == NULL) {
     graph->adjwgt = ismalloc(graph->nedges, 1, "adjwgt");
+    if (graph->adjwgt == NULL)
+      status = METIS_ERROR_MEMORY;
+  }
 
   if (status != METIS_OK) {
     printf("\n***Metis returned with an error.\n");
@@ -126,11 +162,13 @@ int main(int argc, char *argv[])
     if (!params->nooutput) {
       /* Write the solution */
       gk_startcputimer(params->iotimer);
-      WritePartition(params->filename, part, graph->nvtxs, params->nparts); 
+      status = WritePartition(params->filename, part, graph->nvtxs,
+          params->nparts);
       gk_stopcputimer(params->iotimer);
     }
 
-    GPReportResults(params, graph, part, objval);
+    if (status == METIS_OK)
+      status = GPReportResults(params, graph, part, objval);
   }
 
 #ifdef XXX
@@ -144,12 +182,15 @@ int main(int argc, char *argv[])
   }
 #endif
 
-
+cleanup:
+  if (malloc_initialized)
+    gk_malloc_cleanup(0);
   FreeGraph(&graph);
   gk_free((void **)&part, LTERM);
   gk_free((void **)&params->filename, &params->tpwgtsfile, &params->tpwgts, 
       &params->ubvecstr, &params->ubvec, &params, LTERM);
 
+  return status == METIS_OK ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 
@@ -225,12 +266,16 @@ void GPPrintInfo(params_t *params, graph_t *graph)
 /*************************************************************************/
 /*! This function does any post-partitioning reporting */
 /*************************************************************************/
-void GPReportResults(params_t *params, graph_t *graph, idx_t *part, idx_t objval)
+int GPReportResults(params_t *params, graph_t *graph, idx_t *part, idx_t objval)
 { 
+  int status;
+
   gk_startcputimer(params->reporttimer);
-  ComputePartitionInfo(params, graph, part);
+  status = ComputePartitionInfo(params, graph, part);
 
   gk_stopcputimer(params->reporttimer);
+  if (status != METIS_OK)
+    return status;
 
   printf("\nTiming Information ----------------------------------------------------------\n");
   printf("  I/O:          \t\t %7.3"PRREAL" sec\n", gk_getcputimer(params->iotimer));
@@ -251,4 +296,5 @@ void GPReportResults(params_t *params, graph_t *graph, idx_t *part, idx_t objval
 #endif
 
   printf("******************************************************************************\n");
+  return METIS_OK;
 }

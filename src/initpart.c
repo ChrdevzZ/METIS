@@ -54,7 +54,11 @@ void Init2WayPartition(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
       gk_errexit(SIGERR, "Unknown initial partition type: %d\n", ctrl->iptype);
   }
 
+  if (ctrl->status != METIS_OK)
+    goto DONE;
+
   IFSET(ctrl->dbglvl, METIS_DBG_IPART, printf("Initial Cut: %"PRIDX"\n", graph->mincut));
+DONE:
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->InitPartTmr));
   ctrl->dbglvl = dbglvl;
 
@@ -85,6 +89,8 @@ void InitSeparator(ctrl_t *ctrl, graph_t *graph, idx_t niparts)
       else
         GrowBisection(ctrl, graph, ntpwgts, niparts);
 
+      if (ctrl->status != METIS_OK)
+        break;
       Compute2WayPartitionParams(ctrl, graph);
       ConstructSeparator(ctrl, graph);
       break;
@@ -97,7 +103,9 @@ void InitSeparator(ctrl_t *ctrl, graph_t *graph, idx_t niparts)
       gk_errexit(SIGERR, "Unknown iptype of %"PRIDX"\n", ctrl->iptype);
   }
 
-  IFSET(ctrl->dbglvl, METIS_DBG_IPART, printf("Initial Sep: %"PRIDX"\n", graph->mincut));
+  if (ctrl->status == METIS_OK)
+    IFSET(ctrl->dbglvl, METIS_DBG_IPART,
+        printf("Initial Sep: %"PRIDX"\n", graph->mincut));
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->InitPartTmr));
 
   ctrl->dbglvl = dbglvl;
@@ -119,7 +127,8 @@ void RandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   idx_t *xadj, *vwgt, *adjncy, *adjwgt, *where;
   idx_t *perm, *bestwhere;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -127,13 +136,21 @@ void RandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   adjncy = graph->adjncy;
   adjwgt = graph->adjwgt;
 
-  Allocate2WayPartitionMemory(ctrl, graph);
+  if (Allocate2WayPartitionMemory(ctrl, graph) != METIS_OK) {
+    WCOREPOP;
+    return;
+  }
   where = graph->where;
 
   bestwhere = iwspacemalloc(ctrl, nvtxs);
   perm      = iwspacemalloc(ctrl, nvtxs);
+  if (bestwhere == NULL || perm == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
-  zeromaxpwgt = ctrl->ubfactors[0]*graph->tvwgt[0]*ntpwgts[0];
+  zeromaxpwgt = rToIdx(ctrl->ubfactors[0]*graph->tvwgt[0]*ntpwgts[0]);
 
   for (inbfs=0; inbfs<niparts; inbfs++) {
     iset(nvtxs, 1, where);
@@ -195,7 +212,8 @@ void GrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   idx_t *xadj, *vwgt, *adjncy, *adjwgt, *where;
   idx_t *queue, *touched, *gain, *bestwhere;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -203,15 +221,24 @@ void GrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   adjncy = graph->adjncy;
   adjwgt = graph->adjwgt;
 
-  Allocate2WayPartitionMemory(ctrl, graph);
+  if (Allocate2WayPartitionMemory(ctrl, graph) != METIS_OK) {
+    WCOREPOP;
+    return;
+  }
   where = graph->where;
 
   bestwhere = iwspacemalloc(ctrl, nvtxs);
   queue     = iwspacemalloc(ctrl, nvtxs);
   touched   = iwspacemalloc(ctrl, nvtxs);
+  if (bestwhere == NULL || queue == NULL || touched == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
-  onemaxpwgt = ctrl->ubfactors[0]*graph->tvwgt[0]*ntpwgts[1];
-  oneminpwgt = (1.0/ctrl->ubfactors[0])*graph->tvwgt[0]*ntpwgts[1];
+  onemaxpwgt = rToIdx(ctrl->ubfactors[0]*graph->tvwgt[0]*ntpwgts[1]);
+  oneminpwgt = rToIdx((1.0/ctrl->ubfactors[0])*
+      graph->tvwgt[0]*ntpwgts[1]);
 
   for (inbfs=0; inbfs<niparts; inbfs++) {
     iset(nvtxs, 1, where);
@@ -325,24 +352,34 @@ void GrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
 void McRandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, 
          idx_t niparts)
 {
-  idx_t i, ii, j, k, nvtxs, ncon, from, bestcut=0, mincut, inbfs, qnum;
+  idx_t i, ii, j, k, nvtxs, ncon, from, bestcut=0, mincut, qnum;
   idx_t *bestwhere, *where, *perm, *counts;
   idx_t *vwgt;
+  uintmax_t inbfs;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs = graph->nvtxs;
   ncon  = graph->ncon;
   vwgt  = graph->vwgt;
 
-  Allocate2WayPartitionMemory(ctrl, graph);
+  if (Allocate2WayPartitionMemory(ctrl, graph) != METIS_OK) {
+    WCOREPOP;
+    return;
+  }
   where = graph->where;
 
   bestwhere = iwspacemalloc(ctrl, nvtxs);
   perm      = iwspacemalloc(ctrl, nvtxs);
   counts    = iwspacemalloc(ctrl, ncon);
+  if (bestwhere == NULL || perm == NULL || counts == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
-  for (inbfs=0; inbfs<2*niparts; inbfs++) {
+  for (inbfs=0; inbfs<2*(uintmax_t)niparts; inbfs++) {
     irandArrayPermute(nvtxs, perm, nvtxs/2, 1);
     iset(ncon, 0, counts);
 
@@ -385,19 +422,29 @@ void McRandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
 void McGrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, 
          idx_t niparts)
 {
-  idx_t i, j, k, nvtxs, ncon, from, bestcut=0, mincut, inbfs;
+  idx_t i, j, k, nvtxs, ncon, from, bestcut=0, mincut;
   idx_t *bestwhere, *where;
+  uintmax_t inbfs;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs = graph->nvtxs;
 
-  Allocate2WayPartitionMemory(ctrl, graph);
+  if (Allocate2WayPartitionMemory(ctrl, graph) != METIS_OK) {
+    WCOREPOP;
+    return;
+  }
   where = graph->where;
 
   bestwhere = iwspacemalloc(ctrl, nvtxs);
+  if (bestwhere == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
-  for (inbfs=0; inbfs<2*niparts; inbfs++) {
+  for (inbfs=0; inbfs<2*(uintmax_t)niparts; inbfs++) {
     iset(nvtxs, 1, where);
     where[irandInRange(nvtxs)] = 0;
 
@@ -424,6 +471,93 @@ void McGrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
 
 
 /*************************************************************************/
+/*! This function allocates memory for initial node-based bisection. */
+/**************************************************************************/
+static int Allocate2WayNodeBisectionMemory(ctrl_t *ctrl, graph_t *graph)
+{
+  volatile int sigrval=0;
+  idx_t *cleanup_pwgts, *cleanup_where, *cleanup_bndptr, *cleanup_bndind;
+  idx_t *cleanup_id, *cleanup_ed;
+  idx_t * volatile pwgts=NULL, * volatile where=NULL;
+  idx_t * volatile bndptr=NULL, * volatile bndind=NULL;
+  idx_t * volatile id=NULL, * volatile ed=NULL;
+  nrinfo_t *cleanup_nrinfo;
+  nrinfo_t * volatile nrinfo=NULL;
+  idx_t nvtxs;
+
+  if (ctrl == NULL || graph == NULL) {
+    errno = EINVAL;
+    if (ctrl != NULL)
+      ctrl->status = METIS_ERROR_INPUT;
+    return METIS_ERROR_INPUT;
+  }
+
+  nvtxs = graph->nvtxs;
+
+  if (nvtxs < 0) {
+    errno = EINVAL;
+    ctrl->status = METIS_ERROR_INPUT;
+    return METIS_ERROR_INPUT;
+  }
+  if ((uintmax_t)nvtxs > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
+      (uintmax_t)nvtxs > (uintmax_t)SIZE_MAX/sizeof(nrinfo_t)) {
+    errno = EOVERFLOW;
+    goto MEMORY_ERROR;
+  }
+
+  if (!gk_sigtrap()) {
+    errno = ENOMEM;
+    goto MEMORY_ERROR;
+  }
+  METIS_SIGCATCH(sigrval);
+  if (sigrval != 0)
+    goto ALLOCATION_ERROR;
+
+  pwgts  = imalloc(3, "Allocate2WayNodeBisectionMemory: pwgts");
+  where  = imalloc(nvtxs, "Allocate2WayNodeBisectionMemory: where");
+  bndptr = imalloc(nvtxs, "Allocate2WayNodeBisectionMemory: bndptr");
+  bndind = imalloc(nvtxs, "Allocate2WayNodeBisectionMemory: bndind");
+  id     = imalloc(nvtxs, "Allocate2WayNodeBisectionMemory: id");
+  ed     = imalloc(nvtxs, "Allocate2WayNodeBisectionMemory: ed");
+  nrinfo = (nrinfo_t *)gk_malloc((size_t)nvtxs*sizeof(nrinfo_t),
+      "Allocate2WayNodeBisectionMemory: nrinfo");
+  if (pwgts == NULL || where == NULL || bndptr == NULL || bndind == NULL ||
+      id == NULL || ed == NULL || nrinfo == NULL)
+    goto ALLOCATION_ERROR;
+
+  gk_siguntrap();
+  gk_free((void **)&graph->pwgts, &graph->where, &graph->bndptr,
+      &graph->bndind, &graph->id, &graph->ed, &graph->nrinfo, LTERM);
+  graph->pwgts  = (idx_t *)pwgts;
+  graph->where  = (idx_t *)where;
+  graph->bndptr = (idx_t *)bndptr;
+  graph->bndind = (idx_t *)bndind;
+  graph->id     = (idx_t *)id;
+  graph->ed     = (idx_t *)ed;
+  graph->nrinfo = (nrinfo_t *)nrinfo;
+  return METIS_OK;
+
+ALLOCATION_ERROR:
+  cleanup_pwgts = (idx_t *)pwgts;
+  cleanup_where = (idx_t *)where;
+  cleanup_bndptr = (idx_t *)bndptr;
+  cleanup_bndind = (idx_t *)bndind;
+  cleanup_id = (idx_t *)id;
+  cleanup_ed = (idx_t *)ed;
+  cleanup_nrinfo = (nrinfo_t *)nrinfo;
+  gk_free((void **)&cleanup_pwgts, &cleanup_where, &cleanup_bndptr,
+      &cleanup_bndind, &cleanup_id, &cleanup_ed, &cleanup_nrinfo, LTERM);
+  gk_siguntrap();
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  if (errno == 0)
+    errno = ENOMEM;
+  return METIS_ERROR_MEMORY;
+}
+
+
+/*************************************************************************/
 /* This function takes a graph and produces a tri-section into left, right,
    and separator using a region growing algorithm. The resulting separator
    is refined using node FM.
@@ -438,7 +572,8 @@ void GrowBisectionNode(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   idx_t *xadj, *vwgt, *adjncy, *adjwgt, *where, *bndind;
   idx_t *queue, *touched, *gain, *bestwhere;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -449,19 +584,20 @@ void GrowBisectionNode(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   bestwhere = iwspacemalloc(ctrl, nvtxs);
   queue     = iwspacemalloc(ctrl, nvtxs);
   touched   = iwspacemalloc(ctrl, nvtxs);
+  if (bestwhere == NULL || queue == NULL || touched == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
-  onemaxpwgt = ctrl->ubfactors[0]*graph->tvwgt[0]*0.5;
-  oneminpwgt = (1.0/ctrl->ubfactors[0])*graph->tvwgt[0]*0.5;
+  onemaxpwgt = rToIdx(ctrl->ubfactors[0]*graph->tvwgt[0]*0.5);
+  oneminpwgt = rToIdx((1.0/ctrl->ubfactors[0])*graph->tvwgt[0]*0.5);
 
 
-  /* Allocate refinement memory. Allocate sufficient memory for both edge and node */
-  graph->pwgts  = imalloc(3, "GrowBisectionNode: pwgts");
-  graph->where  = imalloc(nvtxs, "GrowBisectionNode: where");
-  graph->bndptr = imalloc(nvtxs, "GrowBisectionNode: bndptr");
-  graph->bndind = imalloc(nvtxs, "GrowBisectionNode: bndind");
-  graph->id     = imalloc(nvtxs, "GrowBisectionNode: id");
-  graph->ed     = imalloc(nvtxs, "GrowBisectionNode: ed");
-  graph->nrinfo = (nrinfo_t *)gk_malloc(nvtxs*sizeof(nrinfo_t), "GrowBisectionNode: nrinfo");
+  if (Allocate2WayNodeBisectionMemory(ctrl, graph) != METIS_OK) {
+    WCOREPOP;
+    return;
+  }
   
   where  = graph->where;
   bndind = graph->bndind;
@@ -529,7 +665,11 @@ void GrowBisectionNode(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
     **************************************************************/
     Compute2WayPartitionParams(ctrl, graph);
     Balance2Way(ctrl, graph, ntpwgts);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     FM_2WayRefine(ctrl, graph, ntpwgts, 4);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
 
     /* Construct and refine the vertex separator */
     for (i=0; i<graph->nbnd; i++) {
@@ -540,7 +680,11 @@ void GrowBisectionNode(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
 
     Compute2WayNodePartitionParams(ctrl, graph); 
     FM_2WayNodeRefine2Sided(ctrl, graph, 1);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     FM_2WayNodeRefine1Sided(ctrl, graph, 4);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
 
     /*
     printf("ISep: [%"PRIDX" %"PRIDX" %"PRIDX" %"PRIDX"] %"PRIDX"\n", 
@@ -556,6 +700,7 @@ void GrowBisectionNode(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   graph->mincut = bestcut;
   icopy(nvtxs, bestwhere, where);
 
+DONE:
   WCOREPOP;
 }
 
@@ -573,21 +718,23 @@ void GrowBisectionNode2(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   idx_t i, j, k, nvtxs, bestcut=0, mincut, inbfs;
   idx_t *xadj, *where, *bndind, *bestwhere;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
 
-  /* Allocate refinement memory. Allocate sufficient memory for both edge and node */
-  graph->pwgts  = imalloc(3, "GrowBisectionNode: pwgts");
-  graph->where  = imalloc(nvtxs, "GrowBisectionNode: where");
-  graph->bndptr = imalloc(nvtxs, "GrowBisectionNode: bndptr");
-  graph->bndind = imalloc(nvtxs, "GrowBisectionNode: bndind");
-  graph->id     = imalloc(nvtxs, "GrowBisectionNode: id");
-  graph->ed     = imalloc(nvtxs, "GrowBisectionNode: ed");
-  graph->nrinfo = (nrinfo_t *)gk_malloc(nvtxs*sizeof(nrinfo_t), "GrowBisectionNode: nrinfo");
-  
   bestwhere = iwspacemalloc(ctrl, nvtxs);
+  if (bestwhere == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
+
+  if (Allocate2WayNodeBisectionMemory(ctrl, graph) != METIS_OK) {
+    WCOREPOP;
+    return;
+  }
 
   where  = graph->where;
   bndind = graph->bndind;
@@ -599,7 +746,11 @@ void GrowBisectionNode2(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
 
     Compute2WayPartitionParams(ctrl, graph);
     General2WayBalance(ctrl, graph, ntpwgts);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     FM_2WayRefine(ctrl, graph, ntpwgts, ctrl->niter);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
 
     /* Construct and refine the vertex separator */
     for (i=0; i<graph->nbnd; i++) {
@@ -610,6 +761,8 @@ void GrowBisectionNode2(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
 
     Compute2WayNodePartitionParams(ctrl, graph); 
     FM_2WayNodeRefine2Sided(ctrl, graph, 4);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
 
     /*
     printf("ISep: [%"PRIDX" %"PRIDX" %"PRIDX" %"PRIDX"] %"PRIDX"\n", 
@@ -625,6 +778,7 @@ void GrowBisectionNode2(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   graph->mincut = bestcut;
   icopy(nvtxs, bestwhere, where);
 
+DONE:
   WCOREPOP;
 }
 

@@ -22,15 +22,17 @@
 int main(int argc, char *argv[])
 {
   idx_t options[METIS_NOPTIONS];
-  graph_t *graph;
-  idx_t *perm, *iperm;
+  graph_t *graph=NULL;
+  idx_t *perm=NULL, *iperm=NULL;
   params_t *params;
-  int status=0;
+  int malloc_initialized=0, status=METIS_OK;
 
   params = parse_cmdline(argc, argv);
 
   gk_startcputimer(params->iotimer);
-  graph = ReadGraph(params);
+  status = ReadGraph(params, &graph);
+  if (status != METIS_OK)
+    goto cleanup;
   gk_stopcputimer(params->iotimer);
 
   /* This is just for internal use to clean up some files
@@ -49,15 +51,22 @@ int main(int argc, char *argv[])
   if (graph->ncon != 1) {
     printf("***The input graph contains %"PRIDX" constraints..\n" 
            "***Ordering requires a graph with one constraint.\n", graph->ncon);
-    exit(0);
+    status = METIS_ERROR_INPUT;
+    goto cleanup;
   }
 
   NDPrintInfo(params, graph);
 
   perm  = imalloc(graph->nvtxs, "main: perm");
   iperm = imalloc(graph->nvtxs, "main: iperm");
+  if (perm == NULL || iperm == NULL) {
+    status = METIS_ERROR_MEMORY;
+    goto cleanup;
+  }
 
-  METIS_SetDefaultOptions(options);
+  status = METIS_SetDefaultOptions(options);
+  if (status != METIS_OK)
+    goto cleanup;
   options[METIS_OPTION_CTYPE]    = params->ctype;
   options[METIS_OPTION_IPTYPE]   = params->iptype;
   options[METIS_OPTION_RTYPE]    = params->rtype;
@@ -72,7 +81,11 @@ int main(int argc, char *argv[])
   options[METIS_OPTION_NSEPS]    = params->nseps;
   options[METIS_OPTION_PFACTOR]  = params->pfactor;
 
-  gk_malloc_init();
+  if (!gk_malloc_init()) {
+    status = METIS_ERROR_MEMORY;
+    goto cleanup;
+  }
+  malloc_initialized = 1;
   gk_startcputimer(params->parttimer);
 
   status = METIS_NodeND(&graph->nvtxs, graph->xadj, graph->adjncy, graph->vwgt, 
@@ -83,9 +96,13 @@ int main(int argc, char *argv[])
     printf("***It seems that Metis did not free all of its memory! Report this.\n");
   params->maxmemory = gk_GetMaxMemoryUsed();
   gk_malloc_cleanup(0);
+  malloc_initialized = 0;
 
-  if (graph->adjwgt == NULL)
+  if (status == METIS_OK && graph->nedges > 0 && graph->adjwgt == NULL) {
     graph->adjwgt = ismalloc(graph->nedges, 1, "adjwgt");
+    if (graph->adjwgt == NULL)
+      status = METIS_ERROR_MEMORY;
+  }
 
   if (status != METIS_OK) {
     printf("\n***Metis returned with an error.\n");
@@ -94,18 +111,23 @@ int main(int argc, char *argv[])
     if (!params->nooutput) {
       /* Write the solution */
       gk_startcputimer(params->iotimer);
-      WritePermutation(params->filename, iperm, graph->nvtxs); 
+      status = WritePermutation(params->filename, iperm, graph->nvtxs);
       gk_stopcputimer(params->iotimer);
     }
 
-    NDReportResults(params, graph, perm, iperm);
+    if (status == METIS_OK)
+      status = NDReportResults(params, graph, perm, iperm);
   }
 
+cleanup:
+  if (malloc_initialized)
+    gk_malloc_cleanup(0);
   FreeGraph(&graph);
   gk_free((void **)&perm, &iperm, LTERM);
   gk_free((void **)&params->filename, &params->tpwgtsfile, &params->tpwgts, 
       &params->ubvec, &params, LTERM);
 
+  return status == METIS_OK ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 
@@ -153,13 +175,16 @@ void NDPrintInfo(params_t *params, graph_t *graph)
 /*************************************************************************/
 /*! This function does any post-ordering reporting */
 /*************************************************************************/
-void NDReportResults(params_t *params, graph_t *graph, idx_t *perm, 
+int NDReportResults(params_t *params, graph_t *graph, idx_t *perm,
          idx_t *iperm)
 { 
-  size_t maxlnz, opc;
+  uint64_t maxlnz, opc;
+  int status;
 
   gk_startcputimer(params->reporttimer);
-  ComputeFillIn(graph, perm, iperm, &maxlnz, &opc);
+  status = ComputeFillIn(graph, perm, iperm, &maxlnz, &opc);
+  if (status != METIS_OK)
+    return status;
   printf("  Nonzeros: %6.3le \tOperation Count: %6.3le\n", (double)maxlnz, (double)opc);
 
   gk_stopcputimer(params->reporttimer);
@@ -185,4 +210,5 @@ void NDReportResults(params_t *params, graph_t *graph, idx_t *perm,
 
   printf("******************************************************************************\n");
 
+  return METIS_OK;
 }

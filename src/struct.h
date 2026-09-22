@@ -188,6 +188,7 @@ typedef struct ctrl_t {
          RefTmr, ProjectTmr, SplitTmr, Aux1Tmr, Aux2Tmr, Aux3Tmr;
 
   /* Workspace information */
+  int status;            /*!< First recoverable error raised below the API boundary */
   gk_mcore_t *mcore;    /*!< The persistent memory core for within function 
                              mallocs/frees */
 
@@ -227,6 +228,7 @@ typedef struct ctrl_t {
 
   /* ondisk related info */
   pid_t pid;            /*!< The pid of the running process */
+  struct ondisk_file_t *ondisk_files;  /*!< Live spill files owned by this call */
 } ctrl_t;
 
 

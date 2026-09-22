@@ -8,11 +8,127 @@ target_link_libraries(metis_api_test PRIVATE METIS::metis)
 metis_test_add_runtime(NAME metis.api TARGET metis_api_test)
 set_tests_properties(metis.api PROPERTIES TIMEOUT 30)
 
+add_executable(metis_api_invalid_dimensions api_invalid_dimensions.c)
+target_link_libraries(metis_api_invalid_dimensions PRIVATE METIS::metis)
+metis_test_add_runtime(NAME metis.api-invalid-dimensions
+  TARGET metis_api_invalid_dimensions)
+set_tests_properties(metis.api-invalid-dimensions PROPERTIES TIMEOUT 30)
+
+add_executable(metis_coarsen_numeric coarsen_numeric.c)
+target_include_directories(metis_coarsen_numeric PRIVATE
+  "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(metis_coarsen_numeric PRIVATE METIS::metis
+  GKlib::GKlib)
+metis_test_add_runtime(NAME metis.coarsen-numeric TARGET metis_coarsen_numeric)
+set_tests_properties(metis.coarsen-numeric PROPERTIES TIMEOUT 30)
+
+# Compile the numbering helpers locally so shared-library visibility does not
+# hide the failure-recovery contract exercised by this fixture.
+add_executable(metis_numbering_failure numbering_failure.c
+  "${PROJECT_SOURCE_DIR}/src/fortran.c")
+target_compile_definitions(metis_numbering_failure PRIVATE METIS_STATIC_DEFINE)
+target_include_directories(metis_numbering_failure PRIVATE
+  "${PROJECT_SOURCE_DIR}/src" "${PROJECT_BINARY_DIR}/include")
+target_link_libraries(metis_numbering_failure PRIVATE GKlib::GKlib)
+metis_test_add_runtime(NAME metis.numbering-failure
+  TARGET metis_numbering_failure)
+set_tests_properties(metis.numbering-failure PROPERTIES TIMEOUT 30)
+
+# Compile against the private graph interface to verify that on-disk spill
+# creation cannot clobber an existing filesystem entry.
+add_executable(metis_ondisk_file_security ondisk_file_security.c)
+target_include_directories(metis_ondisk_file_security PRIVATE
+  "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(metis_ondisk_file_security PRIVATE METIS::metis
+  GKlib::GKlib)
+metis_test_add_runtime(NAME metis.ondisk-file-security
+  TARGET metis_ondisk_file_security)
+set_tests_properties(metis.ondisk-file-security PROPERTIES TIMEOUT 30)
+
+# Compile against the private workspace interface to verify that rejected
+# growth leaves pool positions, capacities, and tracked pointers unchanged.
+add_executable(metis_workspace_failure workspace_failure.c)
+target_include_directories(metis_workspace_failure PRIVATE
+  "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(metis_workspace_failure PRIVATE METIS::metis
+  GKlib::GKlib)
+metis_test_add_runtime(NAME metis.workspace-failure
+  TARGET metis_workspace_failure)
+set_tests_properties(metis.workspace-failure PROPERTIES TIMEOUT 30)
+
+# GNU's linker wrapping lets this fixture fail each allocator call without
+# adding test hooks to the production constructors.
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND NOT METIS_BUILD_SHARED_LIBS)
+  add_executable(metis_constructor_failure constructor_failure.c)
+  target_include_directories(metis_constructor_failure PRIVATE
+    "${PROJECT_SOURCE_DIR}/src")
+  target_link_libraries(metis_constructor_failure PRIVATE METIS::metis
+    GKlib::GKlib)
+  target_link_options(metis_constructor_failure PRIVATE
+    "-Wl,--wrap=gk_malloc"
+    "-Wl,--wrap=gk_malloc_nosignal"
+    "-Wl,--wrap=gk_mcoreMalloc"
+    "-Wl,--wrap=malloc"
+    "-Wl,--wrap=free")
+  metis_test_add_runtime(NAME metis.constructor-failure
+    TARGET metis_constructor_failure)
+  set_tests_properties(metis.constructor-failure PROPERTIES TIMEOUT 30)
+  metis_copy_runtime(metis_constructor_failure)
+
+  add_executable(metis_stat_failure stat_failure.c
+    "${PROJECT_SOURCE_DIR}/apps/stat.c")
+  target_include_directories(metis_stat_failure PRIVATE
+    "${PROJECT_SOURCE_DIR}/apps" "${PROJECT_SOURCE_DIR}/src")
+  target_link_libraries(metis_stat_failure PRIVATE METIS::metis
+    GKlib::GKlib)
+  target_link_options(metis_stat_failure PRIVATE "-Wl,--wrap=gk_malloc")
+  metis_test_add_runtime(NAME metis.stat-failure TARGET metis_stat_failure)
+  set_tests_properties(metis.stat-failure PROPERTIES TIMEOUT 30)
+  metis_copy_runtime(metis_stat_failure)
+endif()
+
+add_executable(metis_smbfactor_failure smbfactor_failure.c)
+target_include_directories(metis_smbfactor_failure PRIVATE
+  "${PROJECT_SOURCE_DIR}/apps" "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(metis_smbfactor_failure PRIVATE METIS::metis
+  GKlib::GKlib)
+metis_test_add_runtime(NAME metis.smbfactor-failure
+  TARGET metis_smbfactor_failure)
+set_tests_properties(metis.smbfactor-failure PROPERTIES TIMEOUT 30)
+
+# Compile the application I/O unit with private failpoints for stream,
+# allocation, close, commit and rollback errors.
+add_executable(metis_output_pair_failure output_pair_failure.c
+  "${PROJECT_SOURCE_DIR}/apps/io.c")
+target_compile_definitions(metis_output_pair_failure PRIVATE
+  METIS_IO_TRANSACTION_TEST)
+target_include_directories(metis_output_pair_failure PRIVATE
+  "${PROJECT_SOURCE_DIR}/apps" "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(metis_output_pair_failure PRIVATE METIS::metis
+  GKlib::GKlib)
+metis_test_add_runtime(NAME metis.output-pair-failure
+  TARGET metis_output_pair_failure)
+set_tests_properties(metis.output-pair-failure PROPERTIES TIMEOUT 30)
+
+if(MSVC OR CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+  target_compile_definitions(metis_ondisk_file_security PRIVATE
+    _CRT_SECURE_NO_WARNINGS)
+  target_compile_definitions(metis_output_pair_failure PRIVATE
+    _CRT_SECURE_NO_WARNINGS)
+endif()
+
 add_executable(metis_fortran_symbols fortran_symbols.c)
 target_link_libraries(metis_fortran_symbols PRIVATE METIS::metis)
 metis_test_add_runtime(NAME metis.fortran-symbols TARGET metis_fortran_symbols)
 set_tests_properties(metis.fortran-symbols PROPERTIES TIMEOUT 30)
 metis_copy_runtime(metis_api_test)
+metis_copy_runtime(metis_api_invalid_dimensions)
+metis_copy_runtime(metis_coarsen_numeric)
+metis_copy_runtime(metis_numbering_failure)
+metis_copy_runtime(metis_ondisk_file_security)
+metis_copy_runtime(metis_workspace_failure)
+metis_copy_runtime(metis_smbfactor_failure)
+metis_copy_runtime(metis_output_pair_failure)
 metis_copy_runtime(metis_fortran_symbols)
 
 # On Windows, verify the shared library exports the compatibility symbol list.
@@ -66,6 +182,22 @@ if(METIS_BUILD_PROGRAMS)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/tpwgts.cmake)
   set_tests_properties(metis.tpwgts PROPERTIES TIMEOUT 30)
 
+  add_test(NAME metis.input-validation
+    COMMAND ${CMAKE_COMMAND}
+      -DGP=$<TARGET_FILE:gpmetis>
+      -DMP=$<TARGET_FILE:mpmetis>
+      -DND=$<TARGET_FILE:ndmetis>
+      -DMG=$<TARGET_FILE:m2gmetis>
+      -DGC=$<TARGET_FILE:graphchk>
+      -DCF=$<TARGET_FILE:cmpfillin>
+      -DGRAPH_DIR=${PROJECT_SOURCE_DIR}/graphs
+      -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/input-validation
+      "-DIDXTYPEWIDTH=${METIS_IDXTYPEWIDTH}"
+      "-DCROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+      "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/input_validation.cmake)
+  set_tests_properties(metis.input-validation PROPERTIES TIMEOUT 60)
+
   # Exercise two-sided refinement diagnostics when only one boundary queue
   # supplies a candidate move.
   add_test(NAME metis.moveinfo
@@ -79,7 +211,8 @@ if(METIS_BUILD_PROGRAMS)
   set_tests_properties(metis.moveinfo PROPERTIES TIMEOUT 60)
 
   if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
-    set_tests_properties(metis.tpwgts metis.moveinfo PROPERTIES
+    set_tests_properties(metis.tpwgts metis.input-validation metis.moveinfo
+      PROPERTIES
       SKIP_REGULAR_EXPRESSION
         "^METIS_RUNTIME_SKIPPED: no cross-compiling emulator")
   endif()

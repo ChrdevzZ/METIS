@@ -20,17 +20,24 @@
 **************************************************************************/
 void ConstructSeparator(ctrl_t *ctrl, graph_t *graph)
 {
-  idx_t i, j, k, nvtxs, nbnd;
+  idx_t i, j, nvtxs, nbnd;
   idx_t *xadj, *where, *bndind;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
   nbnd   = graph->nbnd;
   bndind = graph->bndind;
 
-  where = icopy(nvtxs, graph->where, iwspacemalloc(ctrl, nvtxs));
+  where = iwspacemalloc(ctrl, nvtxs);
+  if (where == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
+  icopy(nvtxs, graph->where, where);
 
   /* Put the nodes in the boundary into the separator */
   for (i=0; i<nbnd; i++) {
@@ -39,9 +46,14 @@ void ConstructSeparator(ctrl_t *ctrl, graph_t *graph)
       where[j] = 2;
   }
 
-  FreeRData(graph);
-
-  Allocate2WayNodePartitionMemory(ctrl, graph);
+  if (Allocate2WayNodePartitionMemory(ctrl, graph) != METIS_OK) {
+    WCOREPOP;
+    return;
+  }
+  if ((void *)graph->ckrinfo == (void *)graph->vkrinfo)
+    graph->ckrinfo = NULL;
+  gk_free((void **)&graph->id, &graph->ed, &graph->ckrinfo,
+      &graph->vkrinfo, LTERM);
   icopy(nvtxs, where, graph->where);
 
   WCOREPOP;
@@ -71,8 +83,10 @@ void ConstructMinCoverSeparator(ctrl_t *ctrl, graph_t *graph)
   idx_t i, ii, j, jj, k, l, nvtxs, nbnd, bnvtxs[3], bnedges[2], csize;
   idx_t *xadj, *adjncy, *bxadj, *badjncy;
   idx_t *where, *bndind, *bndptr, *vmap, *ivmap, *cover;
+  int status;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -86,6 +100,11 @@ void ConstructMinCoverSeparator(ctrl_t *ctrl, graph_t *graph)
   vmap  = iwspacemalloc(ctrl, nvtxs);
   ivmap = iwspacemalloc(ctrl, nbnd);
   cover = iwspacemalloc(ctrl, nbnd);
+  if (vmap == NULL || ivmap == NULL || cover == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
   if (nbnd > 0) {
     /* Go through the boundary and determine the sizes of the bipartite graph */
@@ -105,6 +124,11 @@ void ConstructMinCoverSeparator(ctrl_t *ctrl, graph_t *graph)
 
     bxadj   = iwspacemalloc(ctrl, bnvtxs[2]+1);
     badjncy = iwspacemalloc(ctrl, bnedges[0]+bnedges[1]+1);
+    if (bxadj == NULL || badjncy == NULL) {
+      ctrl->status = METIS_ERROR_MEMORY;
+      WCOREPOP;
+      return;
+    }
 
     /* Construct the ivmap and vmap */
     ASSERT(iset(nvtxs, -1, vmap) == vmap);
@@ -140,7 +164,13 @@ void ConstructMinCoverSeparator(ctrl_t *ctrl, graph_t *graph)
 
     ASSERT(l <= bnedges[0]+bnedges[1]);
 
-    MinCover(bxadj, badjncy, bnvtxs[0], bnvtxs[1], cover, &csize);
+    status = MinCover(bxadj, badjncy, bnvtxs[0], bnvtxs[1], cover,
+        &csize);
+    if (status != METIS_OK) {
+      ctrl->status = status;
+      WCOREPOP;
+      return;
+    }
 
     IFSET(ctrl->dbglvl, METIS_DBG_SEPINFO,
       printf("Nvtxs: %6"PRIDX", [%5"PRIDX" %5"PRIDX"], Cut: %6"PRIDX", SS: [%6"PRIDX" %6"PRIDX"], Cover: %6"PRIDX"\n", nvtxs, graph->pwgts[0], graph->pwgts[1], graph->mincut, bnvtxs[0], bnvtxs[1]-bnvtxs[0], csize));
@@ -158,9 +188,14 @@ void ConstructMinCoverSeparator(ctrl_t *ctrl, graph_t *graph)
   /* Prepare to refine the vertex separator */
   icopy(nvtxs, graph->where, vmap);
 
-  FreeRData(graph);
-
-  Allocate2WayNodePartitionMemory(ctrl, graph);
+  if (Allocate2WayNodePartitionMemory(ctrl, graph) != METIS_OK) {
+    WCOREPOP;
+    return;
+  }
+  if ((void *)graph->ckrinfo == (void *)graph->vkrinfo)
+    graph->ckrinfo = NULL;
+  gk_free((void **)&graph->id, &graph->ed, &graph->ckrinfo,
+      &graph->vkrinfo, LTERM);
   icopy(nvtxs, vmap, graph->where);
 
   WCOREPOP;

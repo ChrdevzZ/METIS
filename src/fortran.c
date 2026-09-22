@@ -112,10 +112,14 @@ void ChangeMesh2FNumbering(idx_t n, idx_t *ptr, idx_t *ind, idx_t nvtxs,
   for (i=0; i<=n; i++)
     ptr[i]++;
 
-  for (i=0; i<xadj[nvtxs]; i++)
-    adjncy[i]++;
-  for (i=0; i<=nvtxs; i++)
-    xadj[i]++;
+  if (xadj != NULL) {
+    if (adjncy != NULL) {
+      for (i=0; i<xadj[nvtxs]; i++)
+        adjncy[i]++;
+    }
+    for (i=0; i<=nvtxs; i++)
+      xadj[i]++;
+  }
 }
 
 
@@ -132,10 +136,14 @@ void ChangeMesh2FNumbering2(idx_t ne, idx_t nn, idx_t *ptr, idx_t *ind,
   for (i=0; i<=ne; i++)
     ptr[i]++;
 
-  for (i=0; i<ne; i++)
-    epart[i]++;
+  if (epart != NULL) {
+    for (i=0; i<ne; i++)
+      epart[i]++;
+  }
 
-  for (i=0; i<nn; i++)
-    npart[i]++;
+  if (npart != NULL) {
+    for (i=0; i<nn; i++)
+      npart[i]++;
+  }
 }
 

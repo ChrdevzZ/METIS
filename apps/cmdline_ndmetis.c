@@ -213,11 +213,11 @@ params_t *parse_cmdline(int argc, char *argv[])
         break;
 
       case METIS_OPTION_UFACTOR:
-        if (gk_optarg) params->ufactor = (idx_t)atoi(gk_optarg);
+        if (gk_optarg) params->ufactor = ParseInteger("ufactor", gk_optarg);
         break;
 
       case METIS_OPTION_PFACTOR:
-        if (gk_optarg) params->pfactor = (idx_t)atoi(gk_optarg);
+        if (gk_optarg) params->pfactor = ParseInteger("pfactor", gk_optarg);
         break;
 
       case METIS_OPTION_COMPRESS:
@@ -241,18 +241,18 @@ params_t *parse_cmdline(int argc, char *argv[])
         break;
 
       case METIS_OPTION_NSEPS:
-        if (gk_optarg) params->nseps = (idx_t)atoi(gk_optarg);
+        if (gk_optarg) params->nseps = ParseInteger("nseps", gk_optarg);
         break;
       case METIS_OPTION_NITER:
-        if (gk_optarg) params->niter = (idx_t)atoi(gk_optarg);
+        if (gk_optarg) params->niter = ParseInteger("niter", gk_optarg);
         break;
 
       case METIS_OPTION_SEED:
-        if (gk_optarg) params->seed = (idx_t)atoi(gk_optarg);
+        if (gk_optarg) params->seed = ParseInteger("seed", gk_optarg);
         break;
 
       case METIS_OPTION_DBGLVL:
-        if (gk_optarg) params->dbglvl = (idx_t)atoi(gk_optarg);
+        if (gk_optarg) params->dbglvl = ParseInteger("dbglvl", gk_optarg);
         break;
 
       case METIS_OPTION_HELP:
@@ -271,7 +271,7 @@ params_t *parse_cmdline(int argc, char *argv[])
     printf("Missing parameters.");
     for (i=0; strlen(shorthelpstr[i]) > 0; i++)
       printf("%s\n", shorthelpstr[i]);
-    exit(0);
+    exit(EXIT_FAILURE);
   }
 
   params->filename = gk_strdup(argv[gk_optind++]);

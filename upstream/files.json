@@ -1,5 +1,6 @@
 {
   "coverage": {
+    "all_upstream_blobs": true,
     "extensions": [
       ".c",
       ".cc",
@@ -50,6 +51,30 @@
   },
   "files": [
     {
+      "baseline_blob": "feb77dee26acc2ab2a2aa5497a0e09d71da7b044",
+      "id": "metis-build-windows-txt",
+      "kind": "modified",
+      "local_path": "BUILD-Windows.txt",
+      "notes": "Identity mapping; fork-specific changes are retained.",
+      "upstream_path": "BUILD-Windows.txt"
+    },
+    {
+      "baseline_blob": "411d865775088d4a36742b2bef41c4a8a90cff44",
+      "id": "metis-changelog",
+      "kind": "direct",
+      "local_path": "Changelog",
+      "notes": "Identity mapping from the upstream path.",
+      "upstream_path": "Changelog"
+    },
+    {
+      "baseline_blob": "4ee9fcf2ab0bb57ccee221da263cae9188e56e96",
+      "id": "metis-claude-md",
+      "kind": "modified",
+      "local_path": "CLAUDE.md",
+      "notes": "Identity mapping; fork-specific changes are retained.",
+      "upstream_path": "CLAUDE.md"
+    },
+    {
       "baseline_blob": "cc5c8acfe9584c69d1b52723099e57a6ffbcc903",
       "id": "metis-cmakelists-txt",
       "kind": "modified",
@@ -74,6 +99,70 @@
       "upstream_path": "conf/gkbuild.cmake"
     },
     {
+      "baseline_blob": "f097e07ab9c784ff24bbdb2de6c2c72db3850025",
+      "id": "metis-gitignore",
+      "kind": "modified",
+      "local_path": ".gitignore",
+      "notes": "Identity mapping; fork-specific changes are retained.",
+      "upstream_path": ".gitignore"
+    },
+    {
+      "baseline_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "id": "metis-gitmodules",
+      "kind": "modified",
+      "local_path": ".gitmodules",
+      "notes": "Identity mapping; fork-specific changes are retained.",
+      "upstream_path": ".gitmodules"
+    },
+    {
+      "baseline_blob": "13bcfc7c8aad97c6c4b161180728b4b4be5e8404",
+      "id": "metis-graphs-4elt-graph",
+      "kind": "direct",
+      "local_path": "graphs/4elt.graph",
+      "notes": "Identity mapping from the upstream path.",
+      "upstream_path": "graphs/4elt.graph"
+    },
+    {
+      "baseline_blob": "c52e6e6f97819ad6a1a15c3b30a4e0a9f171f514",
+      "id": "metis-graphs-copter2-graph",
+      "kind": "direct",
+      "local_path": "graphs/copter2.graph",
+      "notes": "Identity mapping from the upstream path.",
+      "upstream_path": "graphs/copter2.graph"
+    },
+    {
+      "baseline_blob": "4c65d814980d0e132559fcaa40a459a891cfaf85",
+      "id": "metis-graphs-mdual-graph",
+      "kind": "direct",
+      "local_path": "graphs/mdual.graph",
+      "notes": "Identity mapping from the upstream path.",
+      "upstream_path": "graphs/mdual.graph"
+    },
+    {
+      "baseline_blob": "53a98bc26ff2fbd96d7671ecb30ae7745faf7796",
+      "id": "metis-graphs-metis-mesh",
+      "kind": "direct",
+      "local_path": "graphs/metis.mesh",
+      "notes": "Identity mapping from the upstream path.",
+      "upstream_path": "graphs/metis.mesh"
+    },
+    {
+      "baseline_blob": "4935a557f6177b5f5f045429973e7ea9cb84d690",
+      "id": "metis-graphs-readme",
+      "kind": "direct",
+      "local_path": "graphs/README",
+      "notes": "Identity mapping from the upstream path.",
+      "upstream_path": "graphs/README"
+    },
+    {
+      "baseline_blob": "cd5ac8f04f5bf5ec28838c4da8c1abc14d770016",
+      "id": "metis-graphs-test-mgraph",
+      "kind": "direct",
+      "local_path": "graphs/test.mgraph",
+      "notes": "Identity mapping from the upstream path.",
+      "upstream_path": "graphs/test.mgraph"
+    },
+    {
       "baseline_blob": "9515a51b6e5a70bc272ce62f6003aa645d2ea305",
       "id": "metis-include-cmakelists-txt",
       "kind": "modified",
@@ -92,7 +181,7 @@
     {
       "baseline_blob": "bd7b48f832edae240e5ddc37959897a792b83ba6",
       "id": "metis-libmetis-auxapi-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/auxapi.c",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/auxapi.c"
@@ -100,23 +189,23 @@
     {
       "baseline_blob": "4ff70bff33a16891187672ed4fd966b4565d413b",
       "id": "metis-libmetis-balance-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/balance.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; exits when a workspace frame cannot be established and compares the three-times-average balance tolerance without overflowing.",
       "upstream_path": "libmetis/balance.c"
     },
     {
       "baseline_blob": "e126d02a6323e26642f67b28947cc2634356a3c1",
       "id": "metis-libmetis-bucketsort-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/bucketsort.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; checks workspace setup before allocating bucket counts.",
       "upstream_path": "libmetis/bucketsort.c"
     },
     {
       "baseline_blob": "b7fcfeaa917cb9e365cca13cfb925a90669d743f",
       "id": "metis-libmetis-checkgraph-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/checkgraph.c",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/checkgraph.c"
@@ -132,15 +221,15 @@
     {
       "baseline_blob": "1fc9501b9b9d2136664a2f2f080fd8287e85bd24",
       "id": "metis-libmetis-coarsen-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/coarsen.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; validates coarse-graph counts and allocation arithmetic before construction, propagates matching-sort workspace failure, and avoids overflowing matching and drop-edge comparisons.",
       "upstream_path": "libmetis/coarsen.c"
     },
     {
       "baseline_blob": "c2e5ada4b66decaca08f22fd812b4d0169864b8a",
       "id": "metis-libmetis-compress-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/compress.c",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/compress.c"
@@ -148,17 +237,17 @@
     {
       "baseline_blob": "4457234039c97cf3a72db7233b571fd378ec48b2",
       "id": "metis-libmetis-contig-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/contig.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; propagates connectivity allocation failures and handles empty induced vertex sets.",
       "upstream_path": "libmetis/contig.c"
     },
     {
       "baseline_blob": "f09be2fd34459e0c215852086e49907cab9091cd",
       "id": "metis-libmetis-debug-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/debug.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; handles failed diagnostic workspace and objective-helper allocations.",
       "upstream_path": "libmetis/debug.c"
     },
     {
@@ -172,15 +261,15 @@
     {
       "baseline_blob": "88e900dd27ccfc17449fa279c2a813123e9581f4",
       "id": "metis-libmetis-fm-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/fm.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; checks workspace setup before two-way refinement and preserves average-weight and balance decisions at the index limit.",
       "upstream_path": "libmetis/fm.c"
     },
     {
       "baseline_blob": "fd033f0b17942dd964f56d9da676e8984aff7e84",
       "id": "metis-libmetis-fortran-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/fortran.c",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/fortran.c"
@@ -220,7 +309,7 @@
     {
       "baseline_blob": "efb988e00f06c81a83a65361f08c68e1e1422064",
       "id": "metis-libmetis-graph-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/graph.c",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/graph.c"
@@ -228,39 +317,39 @@
     {
       "baseline_blob": "04c7cb48e9aeb27e88507ea26495058ddd595206",
       "id": "metis-libmetis-initpart-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/initpart.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; checks workspace setup before initial partition trials and commits initial node-bisection state only after complete allocation.",
       "upstream_path": "libmetis/initpart.c"
     },
     {
       "baseline_blob": "1dcb200e3ef8b3f7461f39edfe60a1093f133fb8",
       "id": "metis-libmetis-kmetis-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/kmetis.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; distinguishes connectivity allocation failure from disconnected input and keeps the experimental single-constraint block path defined for low-degree graphs.",
       "upstream_path": "libmetis/kmetis.c"
     },
     {
       "baseline_blob": "1ca83c2616fcf4773970ccbe1c1b8c7b865d9c54",
       "id": "metis-libmetis-kwayfm-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/kwayfm.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; grows subdomain adjacency transactionally and evaluates weak connections without signed overflow.",
       "upstream_path": "libmetis/kwayfm.c"
     },
     {
       "baseline_blob": "dec8b65a0c2f82664952cc4c479d5de3153148af",
       "id": "metis-libmetis-kwayrefine-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/kwayrefine.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; K-way cut/volume refinement state allocates transactionally with input, overflow, and nested-signal failure status.",
       "upstream_path": "libmetis/kwayrefine.c"
     },
     {
       "baseline_blob": "a4abe06caa68374fa289703b8914731a0b2da8f5",
       "id": "metis-libmetis-macros-h",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/macros.h",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/macros.h"
@@ -268,15 +357,15 @@
     {
       "baseline_blob": "6e20f556a1e3d8d719f43a49214825ec3cb0dfcc",
       "id": "metis-libmetis-mcutil-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/mcutil.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; compares integer AXPY expressions exactly without evaluating an overflowing product or sum.",
       "upstream_path": "libmetis/mcutil.c"
     },
     {
       "baseline_blob": "3c5261211232b3290b7e9aa3327e145f88482927",
       "id": "metis-libmetis-mesh-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/mesh.c",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/mesh.c"
@@ -284,9 +373,9 @@
     {
       "baseline_blob": "77fd35c55f775d74f70649c8ea47ed0eff12efe1",
       "id": "metis-libmetis-meshpart-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/meshpart.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; checks post-partition allocations and commits caller partition arrays and objective only after both sides succeed.",
       "upstream_path": "libmetis/meshpart.c"
     },
     {
@@ -300,7 +389,7 @@
     {
       "baseline_blob": "7aed41e133c23b0561b1fad249f66d69f092ecef",
       "id": "metis-libmetis-minconn-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/minconn.c",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/minconn.c"
@@ -308,9 +397,9 @@
     {
       "baseline_blob": "fce786474be987f6f7284c7bc6756384ff4f7900",
       "id": "metis-libmetis-mincover-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/mincover.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; allocates minimum-cover work arrays transactionally and reports failure.",
       "upstream_path": "libmetis/mincover.c"
     },
     {
@@ -324,15 +413,15 @@
     {
       "baseline_blob": "38b1d84a1af98da4dad4ff42315e5fe18ff1db17",
       "id": "metis-libmetis-ometis-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/ometis.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; rejects unrepresentable minimum-degree workspace before changing private graph numbering.",
       "upstream_path": "libmetis/ometis.c"
     },
     {
       "baseline_blob": "3f846cf4ccc8027887eec78e2d65efe014b83835",
       "id": "metis-libmetis-options-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/options.c",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/options.c"
@@ -348,7 +437,7 @@
     {
       "baseline_blob": "ec49eefd75a988b7a000c1a18c38c06ba8972e12",
       "id": "metis-libmetis-pmetis-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/pmetis.c",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/pmetis.c"
@@ -364,15 +453,15 @@
     {
       "baseline_blob": "9a9fc0e3ca83a5d24f42030429cbc8ddb3b27009",
       "id": "metis-libmetis-refine-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/refine.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; allocates two-way edge-refinement state transactionally and propagates construction failures.",
       "upstream_path": "libmetis/refine.c"
     },
     {
       "baseline_blob": "a282639f966dea1d146fbc13429e2eaaa7fd516a",
       "id": "metis-libmetis-rename-h",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/rename.h",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/rename.h"
@@ -380,9 +469,9 @@
     {
       "baseline_blob": "72dae9b643a864e1405de53df4bdc817ca6c2b69",
       "id": "metis-libmetis-separator-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/separator.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; checks workspace and minimum-cover setup before changing the separator.",
       "upstream_path": "libmetis/separator.c"
     },
     {
@@ -390,15 +479,15 @@
       "id": "metis-libmetis-sfm-c",
       "kind": "modified",
       "local_path": "src/sfm.c",
-      "notes": "Relocated from libmetis/ to src/; MOVEINFO diagnostics avoid a missing opposite candidate and preserve the selected gain before queue updates.",
+      "notes": "Relocated from libmetis/ to src/; MOVEINFO diagnostics avoid a missing opposite candidate and preserve the selected gain before queue updates. Balance thresholds, capped boundary heuristics, paired one-sided iterations, and nonnegative real-to-index conversions remain defined at the index limit.",
       "upstream_path": "libmetis/sfm.c"
     },
     {
       "baseline_blob": "b4ace2f788e89ac24a00c99e397beebe4bae739b",
       "id": "metis-libmetis-srefine-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/srefine.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/; allocates two-way node-refinement state transactionally and propagates construction failures.",
       "upstream_path": "libmetis/srefine.c"
     },
     {
@@ -420,7 +509,7 @@
     {
       "baseline_blob": "0ded02da00abb01b98a9c8b567a1f8a2f7e665d7",
       "id": "metis-libmetis-struct-h",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/struct.h",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/struct.h"
@@ -444,10 +533,18 @@
     {
       "baseline_blob": "e7c83cadfdde9fa21a28342e6618df4c982a4379",
       "id": "metis-libmetis-wspace-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/wspace.c",
       "notes": "Relocated from libmetis/ to src/.",
       "upstream_path": "libmetis/wspace.c"
+    },
+    {
+      "baseline_blob": "f952fe29791716a3559b34cdffdaa6af35e2622d",
+      "id": "metis-license",
+      "kind": "direct",
+      "local_path": "LICENSE",
+      "notes": "Identity mapping from the upstream path.",
+      "upstream_path": "LICENSE"
     },
     {
       "baseline_blob": null,
@@ -491,10 +588,42 @@
     },
     {
       "baseline_blob": null,
+      "id": "metis-local-src-input-validation-h",
+      "kind": "local",
+      "local_path": "src/input_validation.h",
+      "notes": "Local private validation helpers for checked graph and mesh dimensions, offsets, indices, weights, and derived allocation sizes.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
       "id": "metis-local-tests-api-c",
       "kind": "local",
       "local_path": "tests/api.c",
-      "notes": "Local API, width, partition, mesh, permutation, error, and allocation-ownership regression fixture.",
+      "notes": "Local API, width, partition, mesh, permutation, error, allocation-ownership, and index-limit refinement arithmetic regression fixture.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-api-invalid-dimensions-c",
+      "kind": "local",
+      "local_path": "tests/api_invalid_dimensions.c",
+      "notes": "Local regression fixture for public API input validation, representability, status classification, and output preservation.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-coarsen-numeric-c",
+      "kind": "local",
+      "local_path": "tests/coarsen_numeric.c",
+      "notes": "Local regression fixture for compression hashes, drop-edge ordering, matching and vector AXPY arithmetic, multi-section seed sampling, and initial-partition iteration counts at numeric boundaries.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-constructor-failure-c",
+      "kind": "local",
+      "local_path": "tests/constructor_failure.c",
+      "notes": "Local deterministic failure fixture for control, graph, workspace, two-way and K-way refinement, initial node-bisection, minimum-cover, matching-sort, minimum-degree ordering and coarse-graph size boundaries, graph-conversion construction, and atomic mesh-partition outputs.",
       "upstream_path": null
     },
     {
@@ -527,6 +656,14 @@
       "kind": "local",
       "local_path": "tests/incremental/exports.c",
       "notes": "Local fixture for stable generated export headers and dependency-driven rebuilds.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-input-validation-cmake",
+      "kind": "local",
+      "local_path": "tests/input_validation.cmake",
+      "notes": "Local command-line fixture for malformed inputs, empty or edgeless graphs, and transactional output failures.",
       "upstream_path": null
     },
     {
@@ -579,6 +716,30 @@
     },
     {
       "baseline_blob": null,
+      "id": "metis-local-tests-numbering-failure-c",
+      "kind": "local",
+      "local_path": "tests/numbering_failure.c",
+      "notes": "Local regression fixture for restoring caller-owned 1-based graph numbering after recoverable failures.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-ondisk-file-security-c",
+      "kind": "local",
+      "local_path": "tests/ondisk_file_security.c",
+      "notes": "Local regression fixture for on-disk graph spill ownership, path handling, cleanup, and failure recovery.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-output-pair-failure-c",
+      "kind": "local",
+      "local_path": "tests/output_pair_failure.c",
+      "notes": "Local regression fixture for application read/write status and single or paired output commit and rollback failures.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
       "id": "metis-local-tests-probes-fixture-main-c",
       "kind": "local",
       "local_path": "tests/probes/fixture/main.c",
@@ -602,12 +763,100 @@
       "upstream_path": null
     },
     {
+      "baseline_blob": null,
+      "id": "metis-local-tests-smbfactor-failure-c",
+      "kind": "local",
+      "local_path": "tests/smbfactor_failure.c",
+      "notes": "Local regression fixture for symbolic-factor input validation, allocation, derived-size, 64-bit fill statistics and subscript-capacity failure recovery, including empty and edgeless inputs.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-stat-failure-c",
+      "kind": "local",
+      "local_path": "tests/stat_failure.c",
+      "notes": "Local deterministic fixture for connectivity and application result-reporting allocation failures, empty failure output, cleanup, and empty induced vertex sets.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-workspace-failure-c",
+      "kind": "local",
+      "local_path": "tests/workspace_failure.c",
+      "notes": "Local deterministic fixture for workspace sizing, refinement-pool growth, and failure-state preservation.",
+      "upstream_path": null
+    },
+    {
       "baseline_blob": "beb41897c185514e569ed009bed67800474805f7",
       "id": "metis-makefile",
       "kind": "removed",
       "local_path": null,
       "notes": "Removed by the build-system migration; retained as an upstream tombstone.",
       "upstream_path": "Makefile"
+    },
+    {
+      "baseline_blob": "e1fed75e367563657486362a10a11b88ef44f219",
+      "id": "metis-manual-manual-pdf",
+      "kind": "direct",
+      "local_path": "manual/manual.pdf",
+      "notes": "Identity mapping from the upstream path.",
+      "upstream_path": "manual/manual.pdf"
+    },
+    {
+      "baseline_blob": "d3eaa4f2638c8178453d324401d69335a39f6c45",
+      "id": "metis-perf-compare-sh",
+      "kind": "modified",
+      "local_path": "perf/compare.sh",
+      "notes": "Identity mapping; fork-specific changes are retained.",
+      "upstream_path": "perf/compare.sh"
+    },
+    {
+      "baseline_blob": "de59ea6dc31d4df79f62f6efe17938ce4634e69d",
+      "id": "metis-perf-gitignore",
+      "kind": "direct",
+      "local_path": "perf/.gitignore",
+      "notes": "Identity mapping from the upstream path.",
+      "upstream_path": "perf/.gitignore"
+    },
+    {
+      "baseline_blob": "dcc34c39ad79a3375ace64f56c2b3bd925fab7b9",
+      "id": "metis-perf-harness-sh",
+      "kind": "modified",
+      "local_path": "perf/harness.sh",
+      "notes": "Identity mapping; fork-specific changes are retained.",
+      "upstream_path": "perf/harness.sh"
+    },
+    {
+      "baseline_blob": "f95798106e3353c4c3caa7420cb0f24aff0f99f3",
+      "id": "metis-perf-mem-sh",
+      "kind": "modified",
+      "local_path": "perf/mem.sh",
+      "notes": "Identity mapping; fork-specific changes are retained.",
+      "upstream_path": "perf/mem.sh"
+    },
+    {
+      "baseline_blob": "ef9959672bd3f746237ba14808d673e600c61a74",
+      "id": "metis-perf-results-md",
+      "kind": "modified",
+      "local_path": "perf/RESULTS.md",
+      "notes": "Identity mapping; fork-specific changes are retained.",
+      "upstream_path": "perf/RESULTS.md"
+    },
+    {
+      "baseline_blob": "88806e683218505ad72fa6bd2472d6c1f6429145",
+      "id": "metis-perf-review-md",
+      "kind": "modified",
+      "local_path": "PERF-REVIEW.md",
+      "notes": "Identity mapping; fork-specific changes are retained.",
+      "upstream_path": "PERF-REVIEW.md"
+    },
+    {
+      "baseline_blob": "602463715171db3ab8e62a4fa38aa39881497d5d",
+      "id": "metis-perf-run-opt-sh",
+      "kind": "modified",
+      "local_path": "perf/run_opt.sh",
+      "notes": "Identity mapping; fork-specific changes are retained.",
+      "upstream_path": "perf/run_opt.sh"
     },
     {
       "baseline_blob": "baf40ad4485efadd5aff6a5bdfb1d6e5222c424c",
@@ -620,7 +869,7 @@
     {
       "baseline_blob": "42605843914885c387de200b668e62d4e8c27573",
       "id": "metis-programs-cmdline-gpmetis-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "apps/cmdline_gpmetis.c",
       "notes": "Relocated from programs/ to apps/.",
       "upstream_path": "programs/cmdline_gpmetis.c"
@@ -628,7 +877,7 @@
     {
       "baseline_blob": "75610c364eb1edd252c75a29a3a7c3385b1ec6d4",
       "id": "metis-programs-cmdline-m2gmetis-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "apps/cmdline_m2gmetis.c",
       "notes": "Relocated from programs/ to apps/.",
       "upstream_path": "programs/cmdline_m2gmetis.c"
@@ -636,7 +885,7 @@
     {
       "baseline_blob": "99c48efa5279c5d2deef008c3a1cd8bfc80126aa",
       "id": "metis-programs-cmdline-mpmetis-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "apps/cmdline_mpmetis.c",
       "notes": "Relocated from programs/ to apps/.",
       "upstream_path": "programs/cmdline_mpmetis.c"
@@ -644,7 +893,7 @@
     {
       "baseline_blob": "a8f501c13ffa6235e49da5765634a5abb0add690",
       "id": "metis-programs-cmdline-ndmetis-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "apps/cmdline_ndmetis.c",
       "notes": "Relocated from programs/ to apps/.",
       "upstream_path": "programs/cmdline_ndmetis.c"
@@ -652,9 +901,9 @@
     {
       "baseline_blob": "e1de447d797298cbc42e3b65eb4391fe770efeb4",
       "id": "metis-programs-cmpfillin-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "apps/cmpfillin.c",
-      "notes": "Relocated from programs/ to apps/.",
+      "notes": "Relocated from programs/ to apps/; propagates read and symbolic-factor status and retains 64-bit fill statistics on 32-bit hosts.",
       "upstream_path": "programs/cmpfillin.c"
     },
     {
@@ -670,13 +919,13 @@
       "id": "metis-programs-gpmetis-c",
       "kind": "modified",
       "local_path": "apps/gpmetis.c",
-      "notes": "Relocated from programs/ to apps/. Preserve non-Apple Unix resource usage while restricting /proc reporting to Linux and excluding Windows.",
+      "notes": "Relocated from programs/ to apps/. Propagate result-reporting failures and preserve non-Apple Unix resource usage while restricting /proc reporting to Linux and excluding Windows.",
       "upstream_path": "programs/gpmetis.c"
     },
     {
       "baseline_blob": "b4b3a89f1ab8cdf6efc87a69b49d2cc4a20ed311",
       "id": "metis-programs-graphchk-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "apps/graphchk.c",
       "notes": "Relocated from programs/ to apps/.",
       "upstream_path": "programs/graphchk.c"
@@ -692,7 +941,7 @@
     {
       "baseline_blob": "bb2f2b02d532a2cdf00fc75cc50e8e430b5a51f8",
       "id": "metis-programs-m2gmetis-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "apps/m2gmetis.c",
       "notes": "Relocated from programs/ to apps/.",
       "upstream_path": "programs/m2gmetis.c"
@@ -718,23 +967,23 @@
       "id": "metis-programs-ndmetis-c",
       "kind": "modified",
       "local_path": "apps/ndmetis.c",
-      "notes": "Relocated from programs/ to apps/. Preserve non-Apple Unix resource usage while restricting /proc reporting to Linux and excluding Windows.",
+      "notes": "Relocated from programs/ to apps/. Propagates ordering, output and symbolic-factor reporting status and retains 64-bit fill statistics on 32-bit hosts. Preserve non-Apple Unix resource usage while restricting /proc reporting to Linux and excluding Windows.",
       "upstream_path": "programs/ndmetis.c"
     },
     {
       "baseline_blob": "1e9e6d5f19efbddafe6f35245853a9b95164d54a",
       "id": "metis-programs-proto-h",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "apps/proto.h",
-      "notes": "Relocated from programs/ to apps/.",
+      "notes": "Relocated from programs/ to apps/; private application I/O and reporting interfaces return explicit status, and symbolic-factor statistics use a fixed 64-bit type.",
       "upstream_path": "programs/proto.h"
     },
     {
       "baseline_blob": "597bb5d2a5ce9c9ee687132b4fe185629e78e44a",
       "id": "metis-programs-smbfactor-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "apps/smbfactor.c",
-      "notes": "Relocated from programs/ to apps/.",
+      "notes": "Relocated from programs/ to apps/; validates CSR and permutation arrays, checks symbolic-factor sizes, operation-count accumulation and subscript growth before arithmetic, retains 64-bit fill statistics on 32-bit hosts, and preserves one-based indexing without forming pointers before their arrays.",
       "upstream_path": "programs/smbfactor.c"
     },
     {
@@ -742,7 +991,7 @@
       "id": "metis-programs-stat-c",
       "kind": "modified",
       "local_path": "apps/stat.c",
-      "notes": "Relocated from programs/ to apps/; corrects the file documentation name.",
+      "notes": "Relocated from programs/ to apps/; corrects the file documentation name and returns allocation failures after partial-work cleanup without emitting partial success statistics.",
       "upstream_path": "programs/stat.c"
     },
     {
@@ -752,6 +1001,14 @@
       "local_path": "apps/struct.h",
       "notes": "Relocated from programs/ to apps/.",
       "upstream_path": "programs/struct.h"
+    },
+    {
+      "baseline_blob": "ce932d30962ab19fa0885f804390b5c8288969b5",
+      "id": "metis-readme-md",
+      "kind": "modified",
+      "local_path": "README.md",
+      "notes": "Identity mapping; fork-specific changes are retained.",
+      "upstream_path": "README.md"
     },
     {
       "baseline_blob": "2e7512bfff207087a1129e93e4e12b32f74b6b95",

@@ -26,20 +26,29 @@ graph_t *CompressGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
              idx_t *vwgt, idx_t *cptr, idx_t *cind)
 {
   idx_t i, ii, iii, j, jj, k, l, cnvtxs, cnedges;
-  idx_t *cxadj, *cadjncy, *cvwgt, *mark, *map;
-  ikv_t *keys;
+  uintmax_t key;
+  idx_t *cxadj, *cadjncy, *cvwgt, *mark=NULL, *map=NULL;
+  ikv_t *keys=NULL;
   graph_t *graph=NULL;
 
+  if (nvtxs < 0 ||
+      (uintmax_t)nvtxs > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
+      (uintmax_t)nvtxs > (uintmax_t)SIZE_MAX/sizeof(ikv_t))
+    goto MEMORY_ERROR;
   mark = ismalloc(nvtxs, -1, "CompressGraph: mark");
   map  = ismalloc(nvtxs, -1, "CompressGraph: map");
   keys = ikvmalloc(nvtxs, "CompressGraph: keys");
+  if (mark == NULL || map == NULL || keys == NULL)
+    goto MEMORY_ERROR;
 
   /* Compute a key for each adjacency list */
   for (i=0; i<nvtxs; i++) {
-    k = 0;
+    key = (uintmax_t)i;
     for (j=xadj[i]; j<xadj[i+1]; j++)
-      k += adjncy[j];
-    keys[i].key = k+i; /* Add the diagonal entry as well */
+      key += (uintmax_t)adjncy[j];
+    key &= 2*(uintmax_t)IDX_MAX+1;
+    keys[i].key = (key <= (uintmax_t)IDX_MAX ? (idx_t)key :
+        IDX_MIN+(idx_t)(key-(uintmax_t)IDX_MAX-1));
     keys[i].val = i;
   }
 
@@ -105,18 +114,31 @@ graph_t *CompressGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
        compressed graph */
 
     graph = CreateGraph();
+    if (graph == NULL)
+      goto MEMORY_ERROR;
 
     cnedges = 0;
     for (i=0; i<cnvtxs; i++) {
       ii = cind[cptr[i]];
+      if (xadj[ii+1]-xadj[ii] > IDX_MAX-cnedges)
+        goto MEMORY_ERROR;
       cnedges += xadj[ii+1]-xadj[ii];
     }
+    if ((uintmax_t)(cnvtxs+1) > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
+        (uintmax_t)(cnedges > 0 ? cnedges : 1) >
+            (uintmax_t)SIZE_MAX/sizeof(idx_t))
+      goto MEMORY_ERROR;
 
     /* Allocate memory for the compressed graph */
     cxadj   = graph->xadj   = imalloc(cnvtxs+1, "CompressGraph: xadj");
     cvwgt   = graph->vwgt   = ismalloc(cnvtxs, 0, "CompressGraph: vwgt");
-    cadjncy = graph->adjncy = imalloc(cnedges, "CompressGraph: adjncy");
-              graph->adjwgt = ismalloc(cnedges, 1, "CompressGraph: adjwgt");
+    cadjncy = graph->adjncy = imalloc(cnedges > 0 ? cnedges : 1,
+        "CompressGraph: adjncy");
+              graph->adjwgt = ismalloc(cnedges > 0 ? cnedges : 1, 1,
+        "CompressGraph: adjwgt");
+    if (cxadj == NULL || cvwgt == NULL || cadjncy == NULL ||
+        graph->adjwgt == NULL)
+      goto MEMORY_ERROR;
 
     /* Now go and compress the graph */
     iset(nvtxs, -1, mark);
@@ -145,14 +167,20 @@ graph_t *CompressGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
     graph->nedges = l;
     graph->ncon   = 1;
 
-    SetupGraph_tvwgt(graph);
-    SetupGraph_label(graph);
+    if (SetupGraph_tvwgt(graph) != METIS_OK ||
+        SetupGraph_label(graph) != METIS_OK)
+      goto MEMORY_ERROR;
   }
 
   gk_free((void **)&keys, &map, &mark, LTERM);
 
   return graph;
 
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  FreeGraph(&graph);
+  gk_free((void **)&keys, &map, &mark, LTERM);
+  return NULL;
 }
 
 
@@ -168,11 +196,16 @@ graph_t *PruneGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
              idx_t *vwgt, idx_t *iperm, real_t factor)
 {
   idx_t i, j, k, l, nlarge, pnvtxs, pnedges;
-  idx_t *pxadj, *padjncy, *padjwgt, *pvwgt;
-  idx_t *perm;
+  idx_t *pxadj, *padjncy, *pvwgt;
+  idx_t *perm=NULL;
   graph_t *graph=NULL;
 
+  if (nvtxs <= 0 || (uintmax_t)nvtxs >
+      (uintmax_t)SIZE_MAX/sizeof(idx_t))
+    goto MEMORY_ERROR;
   perm = imalloc(nvtxs, "PruneGraph: perm");
+  if (perm == NULL)
+    goto MEMORY_ERROR;
 
   factor = factor*xadj[nvtxs]/nvtxs;
 
@@ -181,6 +214,8 @@ graph_t *PruneGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
     if (xadj[i+1]-xadj[i] < factor) {
       perm[i] = pnvtxs;
       iperm[pnvtxs++] = i;
+      if (xadj[i+1]-xadj[i] > IDX_MAX-pnedges)
+        goto MEMORY_ERROR;
       pnedges += xadj[i+1]-xadj[i];
     }
     else {
@@ -196,12 +231,24 @@ graph_t *PruneGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
   if (nlarge > 0 && nlarge < nvtxs) {  
     /* Prunning is possible, so go ahead and create the prunned graph */
     graph = CreateGraph();
+    if (graph == NULL)
+      goto MEMORY_ERROR;
+
+    if ((uintmax_t)(pnvtxs+1) > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
+        (uintmax_t)(pnedges > 0 ? pnedges : 1) >
+            (uintmax_t)SIZE_MAX/sizeof(idx_t))
+      goto MEMORY_ERROR;
 
     /* Allocate memory for the prunned graph*/
     pxadj   = graph->xadj   = imalloc(pnvtxs+1, "PruneGraph: xadj");
     pvwgt   = graph->vwgt   = imalloc(pnvtxs, "PruneGraph: vwgt");
-    padjncy = graph->adjncy = imalloc(pnedges, "PruneGraph: adjncy");
-              graph->adjwgt = ismalloc(pnedges, 1, "PruneGraph: adjwgt");
+    padjncy = graph->adjncy = imalloc(pnedges > 0 ? pnedges : 1,
+        "PruneGraph: adjncy");
+              graph->adjwgt = ismalloc(pnedges > 0 ? pnedges : 1, 1,
+        "PruneGraph: adjwgt");
+    if (pxadj == NULL || pvwgt == NULL || padjncy == NULL ||
+        graph->adjwgt == NULL)
+      goto MEMORY_ERROR;
 
     pxadj[0] = pnedges = l = 0;
     for (i=0; i<nvtxs; i++) {
@@ -221,8 +268,9 @@ graph_t *PruneGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
     graph->nedges = pnedges;
     graph->ncon   = 1;
 
-    SetupGraph_tvwgt(graph);
-    SetupGraph_label(graph);
+    if (SetupGraph_tvwgt(graph) != METIS_OK ||
+        SetupGraph_label(graph) != METIS_OK)
+      goto MEMORY_ERROR;
   }
   else if (nlarge > 0 && nlarge == nvtxs) {  
     IFSET(ctrl->dbglvl, METIS_DBG_INFO, 
@@ -234,8 +282,13 @@ graph_t *PruneGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
   gk_free((void **)&perm, LTERM);
 
   return graph;
-}
 
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  FreeGraph(&graph);
+  gk_free((void **)&perm, LTERM);
+  return NULL;
+}
 
 
 

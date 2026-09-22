@@ -33,6 +33,7 @@
 
 /* coarsen.c */
 #define CoarsenGraph			libmetis__CoarsenGraph
+#define CoarsenGraphNlevels              libmetis__CoarsenGraphNlevels
 #define Match_RM                        libmetis__Match_RM
 #define Match_SHEM                      libmetis__Match_SHEM
 #define Match_2Hop                      libmetis__Match_2Hop
@@ -49,6 +50,7 @@
 #define PruneGraph			libmetis__PruneGraph
 
 /* contig.c */
+#define ComputeBFSOrdering              libmetis__ComputeBFSOrdering
 #define FindPartitionInducedComponents  libmetis__FindPartitionInducedComponents   
 #define IsConnected                     libmetis__IsConnected
 #define IsConnectedSubdomain            libmetis__IsConnectedSubdomain
@@ -98,6 +100,7 @@
 #define FreeGraph                       libmetis__FreeGraph
 #define graph_WriteToDisk               libmetis__graph_WriteToDisk
 #define graph_ReadFromDisk              libmetis__graph_ReadFromDisk
+#define graph_CleanupDiskFiles          libmetis__graph_CleanupDiskFiles
 
 /* initpart.c */
 #define Init2WayPartition		libmetis__Init2WayPartition
@@ -107,14 +110,20 @@
 #define McRandomBisection               libmetis__McRandomBisection
 #define McGrowBisection                 libmetis__McGrowBisection
 #define GrowBisectionNode		libmetis__GrowBisectionNode
+#define GrowBisectionNode2              libmetis__GrowBisectionNode2
 
 /* kmetis.c */
 #define MlevelKWayPartitioning		libmetis__MlevelKWayPartitioning
+#define BlockKWayPartitioning           libmetis__BlockKWayPartitioning
+#define GrowMultisection                libmetis__GrowMultisection
+#define BalanceAndRefineLP              libmetis__BalanceAndRefineLP
 #define InitKWayPartitioning            libmetis__InitKWayPartitioning
 
 /* kwayfm.c */
 #define Greedy_KWayOptimize		libmetis__Greedy_KWayOptimize
 #define Greedy_KWayCutOptimize		libmetis__Greedy_KWayCutOptimize
+#define Greedy_KWayEdgeCutOptimize      libmetis__Greedy_KWayEdgeCutOptimize
+#define Greedy_KWayEdgeStats            libmetis__Greedy_KWayEdgeStats
 #define Greedy_KWayVolOptimize          libmetis__Greedy_KWayVolOptimize
 #define Greedy_McKWayCutOptimize        libmetis__Greedy_McKWayCutOptimize
 #define Greedy_McKWayVolOptimize        libmetis__Greedy_McKWayVolOptimize
@@ -264,5 +273,3 @@
 #define vnbrpoolGetNext                 libmetis__vnbrpoolGetNext
 
 #endif
-
-

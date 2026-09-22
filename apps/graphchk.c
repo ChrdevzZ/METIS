@@ -21,23 +21,26 @@
 /*************************************************************************/
 int main(int argc, char *argv[])
 {
-  graph_t *graph, *fgraph;
-  char filename[256];
-  idx_t wgtflag;
+  graph_t *graph=NULL, *fgraph=NULL;
+  int status=EXIT_SUCCESS;
   params_t params;
 
   if (argc != 2 && argc != 3) {
     printf("Usage: %s <GraphFile> [FixedGraphFile (for storing the fixed graph)]\n", argv[0]);
-    exit(0);
+    return EXIT_FAILURE;
   }
 
   memset((void *)&params, 0, sizeof(params_t));
   params.filename = gk_strdup(argv[1]);
     
-  graph = ReadGraph(&params);
+  if (ReadGraph(&params, &graph) != METIS_OK) {
+    status = EXIT_FAILURE;
+    goto cleanup;
+  }
   if (graph->nvtxs == 0) {
     printf("Empty graph!\n");
-    exit(0);
+    status = EXIT_FAILURE;
+    goto cleanup;
   }
 
   printf("**********************************************************************\n");
@@ -55,10 +58,15 @@ int main(int argc, char *argv[])
     printf("   The format of the graph is correct!\n");
   }
   else {
+    status = EXIT_FAILURE;
     printf("   The format of the graph is incorrect!\n");
     if (argc == 3) {
       fgraph = FixGraph(graph);
-      WriteGraph(fgraph, argv[2]);
+      if (fgraph == NULL || WriteGraph(fgraph, argv[2]) != METIS_OK) {
+        status = EXIT_FAILURE;
+        FreeGraph(&fgraph);
+        goto cleanup;
+      }
       FreeGraph(&fgraph);
       printf("   A corrected version was stored at %s\n", argv[2]);
     }
@@ -66,9 +74,11 @@ int main(int argc, char *argv[])
 
   printf("\n**********************************************************************\n");
 
-
+cleanup:
+  FreeGraph(&fgraph);
   FreeGraph(&graph);
   gk_free((void **)&params.filename, &params.tpwgtsfile, &params.tpwgts, LTERM);
+  return status;
 }  
 
 

@@ -10,6 +10,7 @@
 */
 
 #include "metislib.h"
+#include "input_validation.h"
 
 
 /*************************************************************************/
@@ -20,25 +21,40 @@ int METIS_PartGraphKway(idx_t *nvtxs, idx_t *ncon, idx_t *xadj, idx_t *adjncy,
           real_t *tpwgts, real_t *ubvec, idx_t *options, idx_t *objval, 
           idx_t *part)
 {
-  int sigrval=0, renumber=0;
+  volatile int rstatus=METIS_OK, sigrval=0, renumber=0;
+  idx_t coarsen_floor, numflag, objtype;
   graph_t *graph;
-  ctrl_t *ctrl;
+  ctrl_t * volatile ctrl=NULL;
+
+  /* validate all caller-owned dimensions before indexing their arrays */
+  if (nvtxs == NULL || ncon == NULL || nparts == NULL ||
+      objval == NULL || part == NULL)
+    return METIS_ERROR_INPUT;
+  numflag = GETOPTION(options, METIS_OPTION_NUMBERING, 0);
+  objtype = GETOPTION(options, METIS_OPTION_OBJTYPE, METIS_OBJTYPE_CUT);
+  rstatus = ValidateGraphInput(*nvtxs, *ncon, xadj, adjncy, vwgt, vsize,
+      adjwgt, numflag, objtype);
+  if (rstatus != METIS_OK)
+    return rstatus;
 
   /* set up malloc cleaning code and signal catchers */
   if (!gk_malloc_init()) 
     return METIS_ERROR_MEMORY;
 
-  gk_sigtrap();
+  if (!gk_sigtrap()) {
+    gk_malloc_cleanup(0);
+    return METIS_ERROR_MEMORY;
+  }
 
-  if ((sigrval = gk_sigcatch()) != 0)
+  METIS_SIGCATCH(sigrval);
+  if (sigrval != 0)
     goto SIGTHROW;
 
   /* set up the run parameters */
-  ctrl = SetupCtrl(METIS_OP_KMETIS, options, *ncon, *nparts, tpwgts, ubvec);
-  if (!ctrl) {
-    gk_siguntrap();
-    return METIS_ERROR_INPUT;
-  }
+  rstatus = SetupCtrl(METIS_OP_KMETIS, options, *ncon, *nparts, tpwgts,
+      ubvec, (ctrl_t **)&ctrl);
+  if (rstatus != METIS_OK)
+    goto SIGTHROW;
 
   /* if required, change the numbering to 0 */
   if (ctrl->numflag == 1) {
@@ -47,47 +63,74 @@ int METIS_PartGraphKway(idx_t *nvtxs, idx_t *ncon, idx_t *xadj, idx_t *adjncy,
   }
 
   /* set up the graph */
-  graph = SetupGraph(ctrl, *nvtxs, *ncon, xadj, adjncy, vwgt, vsize, adjwgt);
+  rstatus = SetupGraph((ctrl_t *)ctrl, *nvtxs, *ncon, xadj, adjncy, vwgt,
+      vsize, adjwgt, &graph);
+  if (rstatus != METIS_OK)
+    goto SIGTHROW;
 
   /* set up multipliers for making balance computations easier */
   SetupKWayBalMultipliers(ctrl, graph);
 
   /* set various run parameters that depend on the graph */
-  ctrl->CoarsenTo = gk_max((*nvtxs)/(40*gk_max(gk_log2(*nparts), 1)), 30*(*nparts));
-  ctrl->nIparts   = (ctrl->nIparts != -1 ? ctrl->nIparts : (ctrl->CoarsenTo == 30*(*nparts) ? 4 : 5));
+  coarsen_floor = *nparts > IDX_MAX/30 ? IDX_MAX : 30*(*nparts);
+  ctrl->CoarsenTo = gk_max((*nvtxs)/(40*gk_max(gk_log2(*nparts), 1)),
+      coarsen_floor);
+  ctrl->nIparts   = (ctrl->nIparts != -1 ? ctrl->nIparts :
+      (ctrl->CoarsenTo == coarsen_floor ? 4 : 5));
 
   /* take care contiguity requests for disconnected graphs */
-  if (ctrl->contig && !IsConnected(graph, 0)) 
-    gk_errexit(SIGERR, "METIS Error: A contiguous partition is requested for a non-contiguous input graph.\n");
+  if (ctrl->contig) {
+    rstatus = IsConnected(graph, 0);
+    if (rstatus < 0) {
+      rstatus = METIS_ERROR_MEMORY;
+      goto SIGTHROW;
+    }
+    if (!rstatus)
+      gk_errexit(SIGERR, "METIS Error: A contiguous partition is requested for a non-contiguous input graph.\n");
+    rstatus = METIS_OK;
+  }
     
   /* allocate workspace memory */  
-  AllocateWorkSpace(ctrl, graph);
+  rstatus = AllocateWorkSpace((ctrl_t *)ctrl, graph);
+  if (rstatus != METIS_OK)
+    goto SIGTHROW;
 
   /* start the partitioning */
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, InitTimers(ctrl));
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->TotalTmr));
 
   iset(*nvtxs, 0, part);
-  if (ctrl->dbglvl&512)
+  if ((ctrl->dbglvl&512) && graph->ncon == 1)
     *objval = (*nparts == 1 ? 0 : BlockKWayPartitioning(ctrl, graph, part));
   else
     *objval = (*nparts == 1 ? 0 : MlevelKWayPartitioning(ctrl, graph, part));
+  if (ctrl->status != METIS_OK) {
+    rstatus = ctrl->status;
+    goto SIGTHROW;
+  }
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->TotalTmr));
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, PrintTimers(ctrl));
 
   /* clean up */
-  FreeCtrl(&ctrl);
+  FreeCtrl((ctrl_t **)&ctrl);
 
 SIGTHROW:
+  if (ctrl != NULL)
+    graph_CleanupDiskFiles((ctrl_t *)ctrl);
+
   /* if required, change the numbering back to 1 */
-  if (renumber)
-    Change2FNumbering(*nvtxs, xadj, adjncy, part);
+  if (renumber) {
+    if (sigrval == 0 && rstatus == METIS_OK)
+      Change2FNumbering(*nvtxs, xadj, adjncy, part);
+    else
+      Change2FNumbering2(*nvtxs, xadj, adjncy);
+  }
 
   gk_siguntrap();
   gk_malloc_cleanup(0);
 
-  return metis_rcode(sigrval);
+  return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }
 
 
@@ -108,14 +151,16 @@ idx_t MlevelKWayPartitioning(ctrl_t *ctrl, graph_t *graph, idx_t *part)
   idx_t i, j, objval=0, curobj=0, bestobj=0;
   real_t curbal=0.0, bestbal=0.0;
   graph_t *cgraph;
-  int status;
 
 
   for (i=0; i<ctrl->ncuts; i++) {
     cgraph = CoarsenGraph(ctrl, graph);
+    if (cgraph == NULL)
+      return 0;
 
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->InitPartTmr));
-    AllocateKWayPartitionMemory(ctrl, cgraph);
+    if (AllocateKWayPartitionMemory(ctrl, cgraph) != METIS_OK)
+      return 0;
 
     /* Release the work space */
     FreeWorkSpace(ctrl);
@@ -124,14 +169,22 @@ idx_t MlevelKWayPartitioning(ctrl_t *ctrl, graph_t *graph, idx_t *part)
     InitKWayPartitioning(ctrl, cgraph);
 
     /* Re-allocate the work space */
-    AllocateWorkSpace(ctrl, graph);
-    AllocateRefinementWorkSpace(ctrl, graph->nedges, 2*cgraph->nedges);
+    if (AllocateWorkSpace(ctrl, graph) != METIS_OK)
+      return 0;
+    if (cgraph->nedges > IDX_MAX/2) {
+      ctrl->status = METIS_ERROR_MEMORY;
+      return 0;
+    }
+    if (AllocateRefinementWorkSpace(ctrl, graph->nedges,
+                                    2*cgraph->nedges) != METIS_OK)
+      return 0;
 
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->InitPartTmr));
     IFSET(ctrl->dbglvl, METIS_DBG_IPART, 
         printf("Initial %"PRIDX"-way partitioning cut: %"PRIDX"\n", ctrl->nparts, objval));
 
-    RefineKWay(ctrl, graph, cgraph);
+    if (RefineKWay(ctrl, graph, cgraph) != METIS_OK)
+      return 0;
 
     switch (ctrl->objtype) {
       case METIS_OBJTYPE_CUT:
@@ -267,41 +320,62 @@ idx_t BlockKWayPartitioning(ctrl_t *ctrl, graph_t *graph, idx_t *part)
   idx_t *fpwgts, *cpwgts, *fpart, *perm;
   ipq_t *queue;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return 0;
 
   nvtxs = graph->nvtxs;
   vwgt  = graph->vwgt;
 
   nparts = ctrl->nparts;
 
-  mynparts = gk_min(100*nparts, sqrt(nvtxs));
+  mynparts = gk_min(nparts > IDX_MAX/100 ? IDX_MAX : 100*nparts,
+      rToIdx(sqrt(nvtxs)));
 
   for (i=0; i<nvtxs; i++)
     part[i] = i%nparts;
-  irandArrayPermute(nvtxs, part, 4*nvtxs, 0);
+  irandArrayPermute(nvtxs, part,
+      nvtxs > IDX_MAX/4 ? IDX_MAX : 4*nvtxs, 0);
   printf("Random cut: %d\n", (int)ComputeCut(graph, part));
 
   /* create the initial multi-section */
   mynparts = GrowMultisection(ctrl, graph, mynparts, part);
+  if (ctrl->status != METIS_OK) {
+    WCOREPOP;
+    return 0;
+  }
 
   /* balance using label-propagation and refine using a randomized greedy strategy */
   BalanceAndRefineLP(ctrl, graph, mynparts, part);
+  if (ctrl->status != METIS_OK) {
+    WCOREPOP;
+    return 0;
+  }
 
   /* determine the size of the fine partitions */
-  fpwgts = iset(mynparts, 0, iwspacemalloc(ctrl, mynparts));
+  fpwgts = iwspacemalloc(ctrl, mynparts);
+  cpwgts = iwspacemalloc(ctrl, nparts);
+  fpart  = iwspacemalloc(ctrl, mynparts);
+  perm   = iwspacemalloc(ctrl, mynparts);
+  queue  = ipqCreate(nparts);
+  if (fpwgts == NULL || cpwgts == NULL || fpart == NULL || perm == NULL ||
+      queue == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    if (queue != NULL)
+      ipqDestroy(queue);
+    WCOREPOP;
+    return 0;
+  }
+  iset(mynparts, 0, fpwgts);
   for (i=0; i<nvtxs; i++)
     fpwgts[part[i]] += vwgt[i];
 
   /* create and initialize the queue that will determine
      where to put the next one */
-  cpwgts = iset(nparts, 0, iwspacemalloc(ctrl, nparts));
-  queue = ipqCreate(nparts);
+  iset(nparts, 0, cpwgts);
   for (i=0; i<nparts; i++)
     ipqInsert(queue, i, 0);
 
   /* assign the fine partitions into the coarse partitions */
-  fpart = iwspacemalloc(ctrl, mynparts);
-  perm  = iwspacemalloc(ctrl, mynparts);
   irandArrayPermute(mynparts, perm, mynparts, 1);
   for (ii=0; ii<mynparts; ii++) {
     i = perm[ii];
@@ -337,14 +411,21 @@ idx_t GrowMultisection(ctrl_t *ctrl, graph_t *graph, idx_t nparts, idx_t *where)
   idx_t *queue;
   idx_t tvwgt, maxpwgt, *pwgts;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return 0;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
-  vwgt   = graph->xadj;
+  vwgt   = graph->vwgt;
   adjncy = graph->adjncy;
 
   queue = iwspacemalloc(ctrl, nvtxs);
+  pwgts = iwspacemalloc(ctrl, nparts);
+  if (queue == NULL || pwgts == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return 0;
+  }
 
 
   /* Select the seeds for the nparts-way BFS */
@@ -352,16 +433,22 @@ idx_t GrowMultisection(ctrl_t *ctrl, graph_t *graph, idx_t nparts, idx_t *where)
     if (xadj[i+1]-xadj[i] > 1) /* a seed's degree should be > 1 */
       where[nleft++] = i;
   }
+  if (nleft < nparts) {
+    for (i=0; i<nvtxs; i++) {
+      if (xadj[i+1]-xadj[i] <= 1)
+        where[nleft++] = i;
+    }
+  }
   nparts = gk_min(nparts, nleft);
   for (i=0; i<nparts; i++) {
     j = irandInRange(nleft);
     queue[i] = where[j];
-    where[j] = --nleft;
+    where[j] = where[--nleft];
   }
 
-  pwgts   = iset(nparts, 0, iwspacemalloc(ctrl, nparts));
+  iset(nparts, 0, pwgts);
   tvwgt   = isum(nvtxs, vwgt, 1);
-  maxpwgt = (1.5*tvwgt)/nparts;
+  maxpwgt = rToIdx((1.5*tvwgt)/nparts);
 
   iset(nvtxs, -1, where);
   for (i=0; i<nparts; i++) { 
@@ -421,7 +508,8 @@ void BalanceAndRefineLP(ctrl_t *ctrl, graph_t *graph, idx_t nparts, idx_t *where
   idx_t from, to, nmoves, nnbrs, *nbrids, *nbrwgts, *nbrmrks;
   real_t ubfactor;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -429,30 +517,40 @@ void BalanceAndRefineLP(ctrl_t *ctrl, graph_t *graph, idx_t nparts, idx_t *where
   adjncy = graph->adjncy;
   adjwgt = graph->adjwgt;
 
-  pwgts    = iset(nparts, 0, iwspacemalloc(ctrl, nparts));
+  pwgts    = iwspacemalloc(ctrl, nparts);
+  perm     = iwspacemalloc(ctrl, nvtxs);
+  nbrids   = iwspacemalloc(ctrl, nparts);
+  nbrwgts  = iwspacemalloc(ctrl, nparts);
+  nbrmrks  = iwspacemalloc(ctrl, nparts);
+  if (pwgts == NULL || perm == NULL || nbrids == NULL ||
+      nbrwgts == NULL || nbrmrks == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
+  iset(nparts, 0, pwgts);
 
   ubfactor = I2RUBFACTOR(ctrl->ufactor);
   tvwgt    = isum(nvtxs, vwgt, 1);
-  maxpwgt  = (ubfactor*tvwgt)/nparts;
-  minpwgt  = (1.0*tvwgt)/(ubfactor*nparts);
+  maxpwgt  = rToIdx((ubfactor*tvwgt)/nparts);
+  minpwgt  = rToIdx((1.0*tvwgt)/(ubfactor*nparts));
 
   for (i=0; i<nvtxs; i++)
     pwgts[where[i]] += vwgt[i];
 
   /* for randomly visiting the vertices */
-  perm = iincset(nvtxs, 0, iwspacemalloc(ctrl, nvtxs));
+  iincset(nvtxs, 0, perm);
 
   /* for keeping track of adjacent partitions */
-  nbrids  = iwspacemalloc(ctrl, nparts);
-  nbrwgts = iset(nparts, 0, iwspacemalloc(ctrl, nparts));
-  nbrmrks = iset(nparts, -1, iwspacemalloc(ctrl, nparts));
+  iset(nparts, 0, nbrwgts);
+  iset(nparts, -1, nbrmrks);
 
   /* perform a fixed number of balancing LP iterations */
   if (ctrl->dbglvl&METIS_DBG_REFINE) 
     printf("BLP: nparts: %"PRIDX", min-max: [%"PRIDX", %"PRIDX"], bal: %7.4"PRREAL", cut: %9"PRIDX"\n",
         nparts, minpwgt, maxpwgt, 1.0*imax(nparts, pwgts, 1)*nparts/tvwgt, ComputeCut(graph, where));
   for (iter=0; iter<ctrl->niter; iter++) {
-    if (imax(nparts, pwgts, 1)*nparts < ubfactor*tvwgt)
+    if (imax(nparts, pwgts, 1) < ubfactor*tvwgt/nparts)
       break;
 
     irandArrayPermute(nvtxs, perm, nvtxs/8, 1);

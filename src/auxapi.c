@@ -35,6 +35,9 @@ int METIS_Free(void *ptr)
 /*************************************************************************/
 int METIS_SetDefaultOptions(idx_t *options)
 {
+  if (options == NULL)
+    return METIS_ERROR_INPUT;
+
   iset(METIS_NOPTIONS, -1, options);
 
   return METIS_OK;

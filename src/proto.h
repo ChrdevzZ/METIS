@@ -44,13 +44,13 @@ METIS_EXPORT idx_t Match_SHEM(ctrl_t *ctrl, graph_t *graph);
 METIS_EXPORT idx_t Match_2Hop(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
           idx_t cnvtxs, size_t nunmatched);
 METIS_EXPORT idx_t Match_2HopAny(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
-          idx_t cnvtxs, size_t *r_nunmatched, size_t maxdegree);
+          idx_t cnvtxs, size_t *r_nunmatched, idx_t maxdegree);
 METIS_EXPORT idx_t Match_2HopAll(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
-          idx_t cnvtxs, size_t *r_nunmatched, size_t maxdegree);
+          idx_t cnvtxs, size_t *r_nunmatched, idx_t maxdegree);
 METIS_EXPORT idx_t Match_JC(ctrl_t *ctrl, graph_t *graph);
 METIS_EXPORT void PrintCGraphStats(ctrl_t *ctrl, graph_t *graph);
-METIS_EXPORT void CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
-         idx_t *match);
+METIS_EXPORT int CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
+          idx_t *match);
 METIS_EXPORT graph_t *SetupCoarseGraph(graph_t *graph, idx_t cnvtxs, int dovsize);
 METIS_EXPORT void ReAdjustMemory(ctrl_t *ctrl, graph_t *graph, graph_t *cgraph);
 
@@ -114,11 +114,13 @@ METIS_EXPORT void ChangeMesh2FNumbering2(idx_t ne, idx_t nn, idx_t *ptr, idx_t *
 
 
 /* graph.c */
-METIS_EXPORT graph_t *SetupGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t ncon, idx_t *xadj,
-             idx_t *adjncy, idx_t *vwgt, idx_t *vsize, idx_t *adjwgt);
-METIS_EXPORT void SetupGraph_tvwgt(graph_t *graph);
-METIS_EXPORT void SetupGraph_label(graph_t *graph);
-METIS_EXPORT graph_t *SetupSplitGraph(graph_t *graph, idx_t snvtxs, idx_t snedges);
+METIS_EXPORT int SetupGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t ncon,
+                 idx_t *xadj, idx_t *adjncy, idx_t *vwgt, idx_t *vsize,
+                 idx_t *adjwgt, graph_t **r_graph);
+METIS_EXPORT int SetupGraph_tvwgt(graph_t *graph);
+METIS_EXPORT int SetupGraph_label(graph_t *graph);
+METIS_EXPORT int SetupSplitGraph(graph_t *graph, idx_t snvtxs, idx_t snedges,
+                 graph_t **r_sgraph);
 METIS_EXPORT graph_t *CreateGraph(void);
 METIS_EXPORT void InitGraph(graph_t *graph);
 METIS_EXPORT void FreeSData(graph_t *graph);
@@ -126,6 +128,7 @@ METIS_EXPORT void FreeRData(graph_t *graph);
 METIS_EXPORT void FreeGraph(graph_t **graph);
 METIS_EXPORT void graph_WriteToDisk(ctrl_t *ctrl, graph_t *graph);
 METIS_EXPORT void graph_ReadFromDisk(ctrl_t *ctrl, graph_t *graph);
+void graph_CleanupDiskFiles(ctrl_t *ctrl);
 
 
 /* initpart.c */
@@ -169,10 +172,10 @@ METIS_EXPORT void Greedy_KWayEdgeCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t
 
 
 /* kwayrefine.c */
-METIS_EXPORT void RefineKWay(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph);
-METIS_EXPORT void AllocateKWayPartitionMemory(ctrl_t *ctrl, graph_t *graph);
-METIS_EXPORT void ComputeKWayPartitionParams(ctrl_t *ctrl, graph_t *graph);
-METIS_EXPORT void ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph);
+METIS_EXPORT int RefineKWay(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph);
+METIS_EXPORT int AllocateKWayPartitionMemory(ctrl_t *ctrl, graph_t *graph);
+METIS_EXPORT int ComputeKWayPartitionParams(ctrl_t *ctrl, graph_t *graph);
+METIS_EXPORT int ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph);
 METIS_EXPORT void ComputeKWayBoundary(ctrl_t *ctrl, graph_t *graph, idx_t bndtype);
 METIS_EXPORT void ComputeKWayVolGains(ctrl_t *ctrl, graph_t *graph);
 METIS_EXPORT int IsBalanced(ctrl_t *ctrl, graph_t *graph, real_t ffactor);
@@ -202,11 +205,11 @@ METIS_EXPORT void ComputeLoadImbalanceVec(graph_t *graph, idx_t nparts, real_t *
 
 
 /* mesh.c */
-METIS_EXPORT void CreateGraphDual(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind, idx_t ncommon,
+METIS_EXPORT int CreateGraphDual(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind, idx_t ncommon,
           idx_t **r_xadj, idx_t **r_adjncy);
 METIS_EXPORT idx_t FindCommonElements(idx_t qid, idx_t elen, idx_t *eind, idx_t *nptr,
           idx_t *nind, idx_t *eptr, idx_t ncommon, idx_t *marker, idx_t *nbrs);
-METIS_EXPORT void CreateGraphNodal(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind, idx_t **r_xadj,
+METIS_EXPORT int CreateGraphNodal(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind, idx_t **r_xadj,
           idx_t **r_adjncy);
 METIS_EXPORT idx_t FindCommonNodes(idx_t qid, idx_t nelmnts, idx_t *elmntids, idx_t *eptr,
           idx_t *eind, idx_t *marker, idx_t *nbrs);
@@ -216,7 +219,7 @@ METIS_EXPORT void FreeMesh(mesh_t **mesh);
 
 
 /* meshpart.c */
-METIS_EXPORT void InduceRowPartFromColumnPart(idx_t nrows, idx_t *rowptr, idx_t *rowind,
+METIS_EXPORT int InduceRowPartFromColumnPart(idx_t nrows, idx_t *rowptr, idx_t *rowind,
          idx_t *rpart, idx_t *cpart, idx_t nparts, real_t *tpwgts);
 
 
@@ -233,9 +236,9 @@ METIS_EXPORT void MoveGroupMinConnForVol(ctrl_t *ctrl, graph_t *graph, idx_t to,
 
 
 /* mincover.o */
-METIS_EXPORT void MinCover(idx_t *, idx_t *, idx_t, idx_t, idx_t *, idx_t *);
+METIS_EXPORT int MinCover(idx_t *, idx_t *, idx_t, idx_t, idx_t *, idx_t *);
 METIS_EXPORT idx_t MinCover_Augment(idx_t *, idx_t *, idx_t, idx_t *, idx_t *, idx_t *, idx_t);
-METIS_EXPORT void MinCover_Decompose(idx_t *, idx_t *, idx_t, idx_t, idx_t *, idx_t *, idx_t *);
+METIS_EXPORT int MinCover_Decompose(idx_t *, idx_t *, idx_t, idx_t, idx_t *, idx_t *, idx_t *);
 METIS_EXPORT void MinCover_ColDFS(idx_t *, idx_t *, idx_t, idx_t *, idx_t *, idx_t);
 METIS_EXPORT void MinCover_RowDFS(idx_t *, idx_t *, idx_t, idx_t *, idx_t *, idx_t);
 
@@ -264,8 +267,8 @@ METIS_EXPORT void MMDOrder(ctrl_t *ctrl, graph_t *graph, idx_t *order, idx_t las
 
 
 /* options.c */
-METIS_EXPORT ctrl_t *SetupCtrl(moptype_et optype, idx_t *options, idx_t ncon, idx_t nparts,
-            real_t *tpwgts, real_t *ubvec);
+METIS_EXPORT int SetupCtrl(moptype_et optype, idx_t *options, idx_t ncon,
+               idx_t nparts, real_t *tpwgts, real_t *ubvec, ctrl_t **r_ctrl);
 METIS_EXPORT void SetupKWayBalMultipliers(ctrl_t *ctrl, graph_t *graph);
 METIS_EXPORT void Setup2WayBalMultipliers(ctrl_t *ctrl, graph_t *graph, real_t *tpwgts);
 METIS_EXPORT void PrintCtrl(ctrl_t *ctrl);
@@ -291,7 +294,7 @@ METIS_EXPORT void SplitGraphPart(ctrl_t *ctrl, graph_t *graph, graph_t **r_lgrap
 
 /* refine.c */
 METIS_EXPORT void Refine2Way(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph, real_t *rtpwgts);
-METIS_EXPORT void Allocate2WayPartitionMemory(ctrl_t *ctrl, graph_t *graph);
+METIS_EXPORT int Allocate2WayPartitionMemory(ctrl_t *ctrl, graph_t *graph);
 METIS_EXPORT void Compute2WayPartitionParams(ctrl_t *ctrl, graph_t *graph);
 METIS_EXPORT void Project2WayPartition(ctrl_t *ctrl, graph_t *graph);
 
@@ -309,7 +312,7 @@ METIS_EXPORT void FM_2WayNodeBalance(ctrl_t *ctrl, graph_t *graph);
 
 /* srefine.c */
 METIS_EXPORT void Refine2WayNode(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph);
-METIS_EXPORT void Allocate2WayNodePartitionMemory(ctrl_t *ctrl, graph_t *graph);
+METIS_EXPORT int Allocate2WayNodePartitionMemory(ctrl_t *ctrl, graph_t *graph);
 METIS_EXPORT void Compute2WayNodePartitionParams(ctrl_t *ctrl, graph_t *graph);
 METIS_EXPORT void Project2WayNodePartition(ctrl_t *ctrl, graph_t *graph);
 
@@ -335,11 +338,12 @@ METIS_EXPORT int metis_rcode(int sigrval);
 
 
 /* wspace.c */
-METIS_EXPORT void AllocateWorkSpace(ctrl_t *ctrl, graph_t *graph);
-METIS_EXPORT void AllocateRefinementWorkSpace(ctrl_t *ctrl, idx_t nbrpoolsize_max, idx_t nbrpoolsize);
+METIS_EXPORT int AllocateWorkSpace(ctrl_t *ctrl, graph_t *graph);
+METIS_EXPORT int AllocateRefinementWorkSpace(ctrl_t *ctrl,
+                 idx_t nbrpoolsize_max, idx_t nbrpoolsize);
 METIS_EXPORT void FreeWorkSpace(ctrl_t *ctrl);
 METIS_EXPORT void *wspacemalloc(ctrl_t *ctrl, size_t nbytes);
-METIS_EXPORT void wspacepush(ctrl_t *ctrl);
+METIS_EXPORT int wspacepush(ctrl_t *ctrl);
 METIS_EXPORT void wspacepop(ctrl_t *ctrl);
 METIS_EXPORT idx_t *iwspacemalloc(ctrl_t *, idx_t);
 METIS_EXPORT real_t *rwspacemalloc(ctrl_t *, idx_t);

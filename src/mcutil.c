@@ -15,6 +15,62 @@
 
 
 /*************************************************************************/
+/*! Returns the unsigned magnitude of an idx_t value. */
+/**************************************************************************/
+static uintmax_t iMagnitude(idx_t value)
+{
+  return value < 0 ? (uintmax_t)(-(value+1))+1 : (uintmax_t)value;
+}
+
+
+/*************************************************************************/
+/*! Returns the magnitude of high-low when high is at least low. */
+/**************************************************************************/
+static uintmax_t iDiffMagnitude(idx_t high, idx_t low)
+{
+  if (low >= 0)
+    return (uintmax_t)(high-low);
+  if (high < 0)
+    return iMagnitude(low)-iMagnitude(high);
+  return (uintmax_t)high+iMagnitude(low);
+}
+
+
+/*************************************************************************/
+/*! Compares a*x+y with z without evaluating the potentially overflowing
+    product or sum. */
+/**************************************************************************/
+static int iAxpyCompare(idx_t a, idx_t x, idx_t y, idx_t z)
+{
+  int dnegative, mcmp, pnegative;
+  uintmax_t amag, dmag, quotient, xmag;
+
+  amag = iMagnitude(a);
+  xmag = iMagnitude(x);
+  pnegative = a != 0 && x != 0 && ((a < 0) != (x < 0));
+
+  dnegative = z < y;
+  dmag = dnegative ? iDiffMagnitude(y, z) : iDiffMagnitude(z, y);
+
+  if (amag == 0 || xmag == 0)
+    mcmp = dmag == 0 ? 0 : -1;
+  else {
+    quotient = dmag/amag;
+    if (xmag > quotient)
+      mcmp = 1;
+    else if (xmag < quotient)
+      mcmp = -1;
+    else
+      mcmp = dmag%amag == 0 ? 0 : -1;
+  }
+
+  if (pnegative != dnegative)
+    return pnegative ? -1 : 1;
+  return pnegative ? -mcmp : mcmp;
+}
+
+
+/*************************************************************************/
 /*! This function compares two vectors x & y and returns true 
     if \forall i, x[i] <= y[i].
 */
@@ -114,7 +170,7 @@ int ivecge(idx_t n, idx_t *x, idx_t *z)
 int ivecaxpylez(idx_t n, idx_t a, idx_t *x, idx_t *y, idx_t *z)
 {
   for (n--; n>=0; n--) {
-    if (a*x[n]+y[n] > z[n]) 
+    if (iAxpyCompare(a, x[n], y[n], z[n]) > 0)
       return 0;
   }
 
@@ -128,7 +184,7 @@ int ivecaxpylez(idx_t n, idx_t a, idx_t *x, idx_t *y, idx_t *z)
 int ivecaxpygez(idx_t n, idx_t a, idx_t *x, idx_t *y, idx_t *z)
 {
   for (n--; n>=0; n--) {
-    if (a*x[n]+y[n] < z[n]) 
+    if (iAxpyCompare(a, x[n], y[n], z[n]) < 0)
       return 0;
   }
 

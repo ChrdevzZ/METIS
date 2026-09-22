@@ -42,6 +42,8 @@ void Refine2Way(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph, real_t *tpwgts)
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->ProjectTmr));
     Project2WayPartition(ctrl, graph);
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->ProjectTmr));
+    if (ctrl->status != METIS_OK)
+      break;
   }
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->UncoarsenTmr));
@@ -51,19 +53,83 @@ void Refine2Way(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph, real_t *tpwgts)
 /*************************************************************************/
 /*! This function allocates memory for 2-way edge refinement */
 /*************************************************************************/
-void Allocate2WayPartitionMemory(ctrl_t *ctrl, graph_t *graph)
+int Allocate2WayPartitionMemory(ctrl_t *ctrl, graph_t *graph)
 {
+  volatile int sigrval=0;
+  idx_t *cleanup_pwgts, *cleanup_where, *cleanup_bndptr, *cleanup_bndind;
+  idx_t *cleanup_id, *cleanup_ed;
+  idx_t * volatile pwgts=NULL, * volatile where=NULL;
+  idx_t * volatile bndptr=NULL, * volatile bndind=NULL;
+  idx_t * volatile id=NULL, * volatile ed=NULL;
   idx_t nvtxs, ncon;
+
+  if (ctrl == NULL || graph == NULL) {
+    errno = EINVAL;
+    if (ctrl != NULL)
+      ctrl->status = METIS_ERROR_INPUT;
+    return METIS_ERROR_INPUT;
+  }
 
   nvtxs = graph->nvtxs;
   ncon  = graph->ncon;
 
-  graph->pwgts  = imalloc(2*ncon, "Allocate2WayPartitionMemory: pwgts");
-  graph->where  = imalloc(nvtxs, "Allocate2WayPartitionMemory: where");
-  graph->bndptr = imalloc(nvtxs, "Allocate2WayPartitionMemory: bndptr");
-  graph->bndind = imalloc(nvtxs, "Allocate2WayPartitionMemory: bndind");
-  graph->id     = imalloc(nvtxs, "Allocate2WayPartitionMemory: id");
-  graph->ed     = imalloc(nvtxs, "Allocate2WayPartitionMemory: ed");
+  if (ncon <= 0 || nvtxs < 0) {
+    errno = EINVAL;
+    ctrl->status = METIS_ERROR_INPUT;
+    return METIS_ERROR_INPUT;
+  }
+  if (ncon > IDX_MAX/2 ||
+      (uintmax_t)2*ncon > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
+      (uintmax_t)nvtxs > (uintmax_t)SIZE_MAX/sizeof(idx_t)) {
+    errno = EOVERFLOW;
+    goto MEMORY_ERROR;
+  }
+
+  if (!gk_sigtrap()) {
+    errno = ENOMEM;
+    goto MEMORY_ERROR;
+  }
+  METIS_SIGCATCH(sigrval);
+  if (sigrval != 0)
+    goto ALLOCATION_ERROR;
+
+  pwgts  = imalloc(2*ncon, "Allocate2WayPartitionMemory: pwgts");
+  where  = imalloc(nvtxs, "Allocate2WayPartitionMemory: where");
+  bndptr = imalloc(nvtxs, "Allocate2WayPartitionMemory: bndptr");
+  bndind = imalloc(nvtxs, "Allocate2WayPartitionMemory: bndind");
+  id     = imalloc(nvtxs, "Allocate2WayPartitionMemory: id");
+  ed     = imalloc(nvtxs, "Allocate2WayPartitionMemory: ed");
+  if (pwgts == NULL || where == NULL || bndptr == NULL || bndind == NULL ||
+      id == NULL || ed == NULL)
+    goto ALLOCATION_ERROR;
+
+  gk_siguntrap();
+  gk_free((void **)&graph->pwgts, &graph->where, &graph->bndptr,
+      &graph->bndind, &graph->id, &graph->ed, LTERM);
+  graph->pwgts  = (idx_t *)pwgts;
+  graph->where  = (idx_t *)where;
+  graph->bndptr = (idx_t *)bndptr;
+  graph->bndind = (idx_t *)bndind;
+  graph->id     = (idx_t *)id;
+  graph->ed     = (idx_t *)ed;
+  return METIS_OK;
+
+ALLOCATION_ERROR:
+  cleanup_pwgts = (idx_t *)pwgts;
+  cleanup_where = (idx_t *)where;
+  cleanup_bndptr = (idx_t *)bndptr;
+  cleanup_bndind = (idx_t *)bndind;
+  cleanup_id = (idx_t *)id;
+  cleanup_ed = (idx_t *)ed;
+  gk_free((void **)&cleanup_pwgts, &cleanup_where, &cleanup_bndptr,
+      &cleanup_bndind, &cleanup_id, &cleanup_ed, LTERM);
+  gk_siguntrap();
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  if (errno == 0)
+    errno = ENOMEM;
+  return METIS_ERROR_MEMORY;
 }
 
 
@@ -150,7 +216,8 @@ void Project2WayPartition(ctrl_t *ctrl, graph_t *graph)
   graph_t *cgraph;
   int dropedges;
 
-  Allocate2WayPartitionMemory(ctrl, graph);
+  if (Allocate2WayPartitionMemory(ctrl, graph) != METIS_OK)
+    return;
 
   dropedges = ctrl->dropedges;
 

@@ -179,6 +179,99 @@ class UpstreamToolTests(unittest.TestCase):
         )
         self.assertTrue((output / "report.json").is_file())
 
+    def test_all_upstream_blobs_cover_documents_and_new_paths(self):
+        fixture = Fixture(
+            self,
+            {"tracked.c": b"code\n", "README.md": b"before\n"},
+            {"tracked.c": b"code\n", "README.md": b"after\n", "NOTICE": b"notice\n"},
+        )
+        source = {
+            "id": "tracked-c", "upstream_path": "tracked.c",
+            "local_path": "tracked.c", "kind": "direct",
+        }
+        document = {
+            "id": "readme-md", "upstream_path": "README.md",
+            "local_path": "README.md", "kind": "direct",
+        }
+        fixture.manifest([source], coverage_updates={"all_upstream_blobs": True})
+        result = fixture.invoke("check", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("README.md", result.stdout)
+
+        fixture.manifest([source, document], coverage_updates={"all_upstream_blobs": True})
+        self.assertEqual(fixture.invoke("check").returncode, 0)
+        output = fixture.build_root / "all-blobs"
+        fixture.invoke("prepare", "--to", fixture.target, "--output", output)
+        report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+        candidate = json.loads(
+            (output / "manifest-candidate.json").read_text(encoding="utf-8")
+        )
+        by_path = {entry["upstream_path"]: entry for entry in candidate["files"]}
+        self.assertEqual(by_path["README.md"]["kind"], "direct")
+        self.assertEqual(by_path["NOTICE"]["kind"], "removed")
+        self.assertTrue(candidate["coverage"]["all_upstream_blobs"])
+        self.assertIn(
+            "NOTICE",
+            [item["upstream_path"] for item in report["items"] if item["review_required"]],
+        )
+
+    def test_mapped_binary_change_requires_manual_review(self):
+        baseline = b"%PDF-1.5\n\0before\r\n"
+        incoming = b"%PDF-1.5\n\0after\r\n"
+        fixture = Fixture(
+            self,
+            {"manual.pdf": baseline},
+            {"manual.pdf": incoming},
+        )
+        fixture.manifest(
+            [{"id": "manual-pdf", "upstream_path": "manual.pdf",
+              "local_path": "manual.pdf", "kind": "direct"}],
+            coverage_updates={"all_upstream_blobs": True},
+        )
+        output = fixture.build_root / "binary"
+        fixture.invoke("prepare", "--to", fixture.target, "--output", output)
+        report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+        item = report["items"][0]
+        self.assertTrue(item["review_required"])
+        self.assertIn("binary", item["reason"])
+        self.assertEqual(
+            (output / item["candidate_directory"] / "upstream").read_bytes(),
+            incoming,
+        )
+        self.assertFalse((output / item["candidate_directory"] / "proposed").exists())
+
+    def test_binary_mapping_requires_exact_bytes(self):
+        baseline = b"%PDF-1.5\nline\n"
+        fixture = Fixture(self, {"manual.pdf": baseline}, {"manual.pdf": baseline + b"next"})
+        (fixture.source / "manual.pdf").write_bytes(baseline.replace(b"\n", b"\r\n"))
+        fixture.manifest(
+            [{"id": "manual-pdf", "upstream_path": "manual.pdf",
+              "local_path": "manual.pdf", "kind": "direct"}],
+            coverage_updates={"all_upstream_blobs": True},
+        )
+        result = fixture.invoke("check", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("direct entry has local changes", result.stdout)
+
+    def test_non_utf8_binary_change_requires_manual_review(self):
+        fixture = Fixture(
+            self,
+            {"image.bin": b"header\xffbefore"},
+            {"image.bin": b"header\xffafter"},
+        )
+        fixture.manifest(
+            [{"id": "image-bin", "upstream_path": "image.bin",
+              "local_path": "image.bin", "kind": "direct"}],
+            coverage_updates={"all_upstream_blobs": True},
+        )
+        output = fixture.build_root / "non-utf8"
+        fixture.invoke("prepare", "--to", fixture.target, "--output", output)
+        report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+        item = report["items"][0]
+        self.assertTrue(item["review_required"])
+        self.assertIn("binary", item["reason"])
+        self.assertFalse((output / item["candidate_directory"] / "proposed").exists())
+
     def test_prepare_writes_a_clean_three_way_merge(self):
         fixture = Fixture(
             self,

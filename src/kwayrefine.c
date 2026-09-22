@@ -14,9 +14,9 @@
 /*************************************************************************/
 /*! This function is the entry point of cut-based refinement */
 /*************************************************************************/
-void RefineKWay(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph)
+int RefineKWay(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph)
 {
-  idx_t i, nlevels, contig=ctrl->contig;
+  idx_t i, ncmps, nlevels, contig=ctrl->contig;
   graph_t *ptr;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->UncoarsenTmr));
@@ -25,21 +25,34 @@ void RefineKWay(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph)
   for (ptr=graph, nlevels=0; ptr!=orggraph; ptr=ptr->finer, nlevels++); 
 
   /* Compute the parameters of the coarsest graph */
-  ComputeKWayPartitionParams(ctrl, graph);
+  if (ComputeKWayPartitionParams(ctrl, graph) != METIS_OK)
+    goto ERROR;
 
   /* Try to minimize the sub-domain connectivity */
   if (ctrl->minconn) 
     EliminateSubDomainEdges(ctrl, graph);
+  if (ctrl->status != METIS_OK)
+    goto ERROR;
   
   /* Deal with contiguity constraints at the beginning */
-  if (contig && FindPartitionInducedComponents(graph, graph->where, NULL, NULL) > ctrl->nparts) { 
+  ncmps = contig ? FindPartitionInducedComponents(graph, graph->where,
+      NULL, NULL) : 0;
+  if (ncmps < 0)
+    goto ERROR;
+  if (contig && ncmps > ctrl->nparts) {
     EliminateComponents(ctrl, graph);
+    if (ctrl->status != METIS_OK)
+      goto ERROR;
 
     ComputeKWayBoundary(ctrl, graph, BNDTYPE_BALANCE);
     Greedy_KWayOptimize(ctrl, graph, 5, 0, OMODE_BALANCE); 
+    if (ctrl->status != METIS_OK)
+      goto ERROR;
 
     ComputeKWayBoundary(ctrl, graph, BNDTYPE_REFINE);
     Greedy_KWayOptimize(ctrl, graph, ctrl->niter, 0, OMODE_REFINE); 
+    if (ctrl->status != METIS_OK)
+      goto ERROR;
 
     ctrl->contig = 0;
   }
@@ -48,31 +61,46 @@ void RefineKWay(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph)
   for (i=0; ;i++) {
     if (ctrl->minconn && i == nlevels/2) 
       EliminateSubDomainEdges(ctrl, graph);
+    if (ctrl->status != METIS_OK)
+      goto ERROR;
 
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->RefTmr));
 
     if (2*i >= nlevels && !IsBalanced(ctrl, graph, .02)) {
       ComputeKWayBoundary(ctrl, graph, BNDTYPE_BALANCE);
       Greedy_KWayOptimize(ctrl, graph, 1, 0, OMODE_BALANCE); 
+      if (ctrl->status != METIS_OK)
+        goto ERROR;
       ComputeKWayBoundary(ctrl, graph, BNDTYPE_REFINE);
     }
 
     Greedy_KWayOptimize(ctrl, graph, ctrl->niter, 5.0, OMODE_REFINE); 
+    if (ctrl->status != METIS_OK)
+      goto ERROR;
 
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->RefTmr));
 
     /* Deal with contiguity constraints in the middle */
     if (contig && i == nlevels/2) {
-      if (FindPartitionInducedComponents(graph, graph->where, NULL, NULL) > ctrl->nparts) {
+      ncmps = FindPartitionInducedComponents(graph, graph->where, NULL, NULL);
+      if (ncmps < 0)
+        goto ERROR;
+      if (ncmps > ctrl->nparts) {
         EliminateComponents(ctrl, graph);
+        if (ctrl->status != METIS_OK)
+          goto ERROR;
 
         if (!IsBalanced(ctrl, graph, .02)) {
           ctrl->contig = 1;
           ComputeKWayBoundary(ctrl, graph, BNDTYPE_BALANCE);
           Greedy_KWayOptimize(ctrl, graph, 5, 0, OMODE_BALANCE); 
+          if (ctrl->status != METIS_OK)
+            goto ERROR;
   
           ComputeKWayBoundary(ctrl, graph, BNDTYPE_REFINE);
           Greedy_KWayOptimize(ctrl, graph, ctrl->niter, 0, OMODE_REFINE); 
+          if (ctrl->status != METIS_OK)
+            goto ERROR;
           ctrl->contig = 0;
         }
       }
@@ -84,71 +112,166 @@ void RefineKWay(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph)
     graph = graph->finer;
 
     graph_ReadFromDisk(ctrl, graph);
+    if (ctrl->status != METIS_OK)
+      goto ERROR;
 
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->ProjectTmr));
     ASSERT(graph->vwgt != NULL);
 
-    ProjectKWayPartition(ctrl, graph);
+    if (ProjectKWayPartition(ctrl, graph) != METIS_OK)
+      goto ERROR;
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->ProjectTmr));
   }
 
   /* Deal with contiguity requirement at the end */
   ctrl->contig = contig;
-  if (contig && FindPartitionInducedComponents(graph, graph->where, NULL, NULL) > ctrl->nparts) 
+  ncmps = contig ? FindPartitionInducedComponents(graph, graph->where,
+      NULL, NULL) : 0;
+  if (ncmps < 0)
+    goto ERROR;
+  if (contig && ncmps > ctrl->nparts)
     EliminateComponents(ctrl, graph);
+  if (ctrl->status != METIS_OK)
+    goto ERROR;
 
   if (!IsBalanced(ctrl, graph, 0.0)) {
     ComputeKWayBoundary(ctrl, graph, BNDTYPE_BALANCE);
     Greedy_KWayOptimize(ctrl, graph, 10, 0, OMODE_BALANCE); 
+    if (ctrl->status != METIS_OK)
+      goto ERROR;
 
     ComputeKWayBoundary(ctrl, graph, BNDTYPE_REFINE);
     Greedy_KWayOptimize(ctrl, graph, ctrl->niter, 0, OMODE_REFINE); 
+    if (ctrl->status != METIS_OK)
+      goto ERROR;
   }
 
   if (ctrl->contig) 
     ASSERT(FindPartitionInducedComponents(graph, graph->where, NULL, NULL) == ctrl->nparts);
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->UncoarsenTmr));
+  return METIS_OK;
+
+ERROR:
+  ctrl->contig = contig;
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->UncoarsenTmr));
+  return ctrl->status == METIS_OK ? METIS_ERROR_MEMORY : ctrl->status;
 }
 
 
 /*************************************************************************/
 /*! This function allocates memory for the k-way cut-based refinement */
 /*************************************************************************/
-void AllocateKWayPartitionMemory(ctrl_t *ctrl, graph_t *graph)
+int AllocateKWayPartitionMemory(ctrl_t *ctrl, graph_t *graph)
 {
+  volatile int sigrval=0;
+  idx_t *cleanup_pwgts, *cleanup_where, *cleanup_bndptr, *cleanup_bndind;
+  ckrinfo_t *cleanup_ckrinfo;
+  vkrinfo_t *cleanup_vkrinfo;
+  idx_t * volatile pwgts=NULL, * volatile where=NULL;
+  idx_t * volatile bndptr=NULL, * volatile bndind=NULL;
+  ckrinfo_t * volatile ckrinfo=NULL;
+  vkrinfo_t * volatile vkrinfo=NULL;
+  idx_t nvtxs, ncon, nparts;
+  size_t npwgts;
+  int saved_errno;
 
-  graph->pwgts  = imalloc(ctrl->nparts*graph->ncon, "AllocateKWayPartitionMemory: pwgts");
-  graph->where  = imalloc(graph->nvtxs,  "AllocateKWayPartitionMemory: where");
-  graph->bndptr = imalloc(graph->nvtxs,  "AllocateKWayPartitionMemory: bndptr");
-  graph->bndind = imalloc(graph->nvtxs,  "AllocateKWayPartitionMemory: bndind");
-
-  switch (ctrl->objtype) {
-    case METIS_OBJTYPE_CUT:
-      graph->ckrinfo  = (ckrinfo_t *)gk_malloc(graph->nvtxs*sizeof(ckrinfo_t), 
-                          "AllocateKWayPartitionMemory: ckrinfo");
-      break;
-
-    case METIS_OBJTYPE_VOL:
-      graph->vkrinfo = (vkrinfo_t *)gk_malloc(graph->nvtxs*sizeof(vkrinfo_t), 
-                          "AllocateKWayVolPartitionMemory: vkrinfo");
-
-      /* This is to let the cut-based -minconn and -contig large-scale graph
-         changes to go through */
-      graph->ckrinfo = (ckrinfo_t *)graph->vkrinfo;
-      break;
-
-    default:
-      gk_errexit(SIGERR, "Unknown objtype of %d\n", ctrl->objtype);
+  if (ctrl == NULL || graph == NULL) {
+    errno = EINVAL;
+    if (ctrl != NULL)
+      ctrl->status = METIS_ERROR_INPUT;
+    return METIS_ERROR_INPUT;
   }
 
+  nvtxs = graph->nvtxs;
+  ncon   = graph->ncon;
+  nparts = ctrl->nparts;
+  if (ncon <= 0 || nvtxs < 0 || nparts <= 0 ||
+      (ctrl->objtype != METIS_OBJTYPE_CUT &&
+       ctrl->objtype != METIS_OBJTYPE_VOL)) {
+    errno = EINVAL;
+    ctrl->status = METIS_ERROR_INPUT;
+    return METIS_ERROR_INPUT;
+  }
+  if (nparts > IDX_MAX/ncon ||
+      (uintmax_t)nparts >
+          (uintmax_t)(SIZE_MAX/sizeof(idx_t))/(uintmax_t)ncon) {
+    errno = EOVERFLOW;
+    goto MEMORY_ERROR;
+  }
+  npwgts = (size_t)nparts*(size_t)ncon;
+  if ((uintmax_t)nvtxs > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
+      (ctrl->objtype == METIS_OBJTYPE_CUT &&
+       (uintmax_t)nvtxs > (uintmax_t)SIZE_MAX/sizeof(ckrinfo_t)) ||
+      (ctrl->objtype == METIS_OBJTYPE_VOL &&
+       (uintmax_t)nvtxs > (uintmax_t)SIZE_MAX/sizeof(vkrinfo_t))) {
+    errno = EOVERFLOW;
+    goto MEMORY_ERROR;
+  }
+
+  if (!gk_sigtrap()) {
+    errno = ENOMEM;
+    goto MEMORY_ERROR;
+  }
+  METIS_SIGCATCH(sigrval);
+  if (sigrval != 0)
+    goto ALLOCATION_ERROR;
+
+  pwgts  = imalloc(npwgts, "AllocateKWayPartitionMemory: pwgts");
+  where  = imalloc(nvtxs, "AllocateKWayPartitionMemory: where");
+  bndptr = imalloc(nvtxs, "AllocateKWayPartitionMemory: bndptr");
+  bndind = imalloc(nvtxs, "AllocateKWayPartitionMemory: bndind");
+  if (pwgts == NULL || where == NULL || bndptr == NULL || bndind == NULL)
+    goto ALLOCATION_ERROR;
+
+  if (ctrl->objtype == METIS_OBJTYPE_CUT)
+    ckrinfo = (ckrinfo_t *)gk_malloc((size_t)nvtxs*sizeof(ckrinfo_t),
+                        "AllocateKWayPartitionMemory: ckrinfo");
+  else
+    vkrinfo = (vkrinfo_t *)gk_malloc((size_t)nvtxs*sizeof(vkrinfo_t),
+                        "AllocateKWayVolPartitionMemory: vkrinfo");
+  if (ckrinfo == NULL && vkrinfo == NULL)
+    goto ALLOCATION_ERROR;
+
+  gk_siguntrap();
+  if ((void *)graph->ckrinfo == (void *)graph->vkrinfo)
+    graph->ckrinfo = NULL;
+  gk_free((void **)&graph->pwgts, &graph->where, &graph->bndptr,
+      &graph->bndind, &graph->ckrinfo, &graph->vkrinfo, LTERM);
+  graph->pwgts  = (idx_t *)pwgts;
+  graph->where  = (idx_t *)where;
+  graph->bndptr = (idx_t *)bndptr;
+  graph->bndind = (idx_t *)bndind;
+  graph->ckrinfo = ctrl->objtype == METIS_OBJTYPE_VOL ?
+      (ckrinfo_t *)vkrinfo : (ckrinfo_t *)ckrinfo;
+  graph->vkrinfo = (vkrinfo_t *)vkrinfo;
+  return METIS_OK;
+
+ALLOCATION_ERROR:
+  saved_errno = errno;
+  cleanup_pwgts = (idx_t *)pwgts;
+  cleanup_where = (idx_t *)where;
+  cleanup_bndptr = (idx_t *)bndptr;
+  cleanup_bndind = (idx_t *)bndind;
+  cleanup_ckrinfo = (ckrinfo_t *)ckrinfo;
+  cleanup_vkrinfo = (vkrinfo_t *)vkrinfo;
+  gk_free((void **)&cleanup_pwgts, &cleanup_where, &cleanup_bndptr,
+      &cleanup_bndind, &cleanup_ckrinfo, &cleanup_vkrinfo, LTERM);
+  gk_siguntrap();
+  errno = saved_errno;
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  if (errno == 0)
+    errno = ENOMEM;
+  return METIS_ERROR_MEMORY;
 }
 
 
 /*************************************************************************/
 /*! This function computes the initial id/ed  for cut-based partitioning */
 /*************************************************************************/
-void ComputeKWayPartitionParams(ctrl_t *ctrl, graph_t *graph)
+int ComputeKWayPartitionParams(ctrl_t *ctrl, graph_t *graph)
 {
   idx_t i, j, k, l, nvtxs, ncon, nparts, nbnd, mincut, me, other;
   idx_t *xadj, *vwgt, *adjncy, *adjwgt, *pwgts, *where, *bndind, *bndptr;
@@ -210,6 +333,8 @@ void ComputeKWayPartitionParams(ctrl_t *ctrl, graph_t *graph)
             mincut += myrinfo->ed;
 
             myrinfo->inbr = cnbrpoolGetNext(ctrl, xadj[i+1]-xadj[i]);
+            if (myrinfo->inbr == -1)
+              return ctrl->status;
             mynbrs        = ctrl->cnbrpool + myrinfo->inbr;
 
             for (j=xadj[i]; j<xadj[i+1]; j++) {
@@ -272,6 +397,8 @@ void ComputeKWayPartitionParams(ctrl_t *ctrl, graph_t *graph)
             mincut += myrinfo->ned;
 
             myrinfo->inbr = vnbrpoolGetNext(ctrl, xadj[i+1]-xadj[i]);
+            if (myrinfo->inbr == -1)
+              return ctrl->status;
             mynbrs        = ctrl->vnbrpool + myrinfo->inbr;
 
             for (j=xadj[i]; j<xadj[i+1]; j++) {
@@ -307,6 +434,7 @@ void ComputeKWayPartitionParams(ctrl_t *ctrl, graph_t *graph)
       gk_errexit(SIGERR, "Unknown objtype of %d\n", ctrl->objtype);
   }
 
+  return METIS_OK;
 }
 
 
@@ -314,7 +442,7 @@ void ComputeKWayPartitionParams(ctrl_t *ctrl, graph_t *graph)
 /*! This function projects a partition, and at the same time computes the
  parameters for refinement. */
 /*************************************************************************/
-void ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph)
+int ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph)
 {
   idx_t i, j, k, nvtxs, nbnd, nparts, me, other, istart, iend, tid, ted;
   idx_t *xadj, *adjncy, *adjwgt;
@@ -322,7 +450,8 @@ void ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph)
   graph_t *cgraph;
   int dropedges;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return METIS_ERROR_MEMORY;
 
   dropedges = ctrl->dropedges;
 
@@ -338,22 +467,26 @@ void ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph)
     ASSERT(cgraph->minvol == ComputeVolume(cgraph, cgraph->where));
   }
 
-  /* free the coarse graph's structure (reduce maxmem) */
-  FreeSData(cgraph);
-
   nvtxs   = graph->nvtxs;
   cmap    = graph->cmap;
   xadj    = graph->xadj;
   adjncy  = graph->adjncy;
   adjwgt  = graph->adjwgt;
 
-  AllocateKWayPartitionMemory(ctrl, graph);
+  if (AllocateKWayPartitionMemory(ctrl, graph) != METIS_OK)
+    goto ERROR;
 
   where  = graph->where;
   bndind = graph->bndind;
   bndptr = iset(nvtxs, -1, graph->bndptr);
 
-  htable = iset(nparts, -1, iwspacemalloc(ctrl, nparts));
+  htable = iwspacemalloc(ctrl, nparts);
+  if (htable == NULL)
+    goto ERROR;
+  iset(nparts, -1, htable);
+
+  /* free the coarse graph's structure (reduce maxmem) */
+  FreeSData(cgraph);
 
   /* Compute the required info for refinement */
   switch (ctrl->objtype) {
@@ -387,6 +520,8 @@ void ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph)
           }
           else { /* Potentially an interface node */
             myrinfo->inbr = cnbrpoolGetNext(ctrl, iend-istart);
+            if (myrinfo->inbr == -1)
+              goto ERROR;
             mynbrs        = ctrl->cnbrpool + myrinfo->inbr;
 
             me = where[i];
@@ -456,6 +591,8 @@ void ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph)
           }
           else { /* Potentially an interface node */
             myrinfo->inbr = vnbrpoolGetNext(ctrl, iend-istart);
+            if (myrinfo->inbr == -1)
+              goto ERROR;
             mynbrs        = ctrl->vnbrpool + myrinfo->inbr;
 
             me = where[i];
@@ -508,6 +645,13 @@ void ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph)
   FreeGraph(&graph->coarser);
 
   WCOREPOP;
+  return METIS_OK;
+
+ERROR:
+  if (ctrl->status == METIS_OK)
+    ctrl->status = METIS_ERROR_MEMORY;
+  WCOREPOP;
+  return ctrl->status;
 }
 
 
@@ -577,7 +721,8 @@ void ComputeKWayVolGains(ctrl_t *ctrl, graph_t *graph)
   vkrinfo_t *myrinfo, *orinfo;
   vnbr_t *mynbrs, *onbrs;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nparts = ctrl->nparts;
 
@@ -591,7 +736,13 @@ void ComputeKWayVolGains(ctrl_t *ctrl, graph_t *graph)
   bndind = graph->bndind;
   bndptr = iset(nvtxs, -1, graph->bndptr);
 
-  ophtable = iset(nparts, -1, iwspacemalloc(ctrl, nparts));
+  ophtable = iwspacemalloc(ctrl, nparts);
+  if (ophtable == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
+  iset(nparts, -1, ophtable);
 
   /* Compute the volume gains */
   graph->minvol = graph->nbnd = 0;
@@ -679,4 +830,3 @@ int IsBalanced(ctrl_t *ctrl, graph_t *graph, real_t ffactor)
     (ComputeLoadImbalanceDiff(graph, ctrl->nparts, ctrl->pijbm, ctrl->ubfactors) 
          <= ffactor);
 }
-

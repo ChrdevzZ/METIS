@@ -17,7 +17,11 @@ function(run_tpwgts_case name contents expected)
   set(weights "${WORK_DIR}/${name}.tpwgts")
   file(WRITE "${weights}" "${contents}")
 
-  set(command "${GP}" -seed=42 -nooutput "-tpwgts=${weights}" "${graph}" 2)
+  set(nparts 2)
+  if(ARGC GREATER 3)
+    set(nparts "${ARGV3}")
+  endif()
+  set(command "${GP}" -seed=42 -nooutput "-tpwgts=${weights}" "${graph}" "${nparts}")
   if(CROSSCOMPILING)
     list(PREPEND command ${EMULATOR})
   endif()
@@ -47,6 +51,8 @@ endfunction()
 
 run_tpwgts_case(valid "0=0.5\n" SUCCESS)
 run_tpwgts_case(valid-range "0-1:0=0.5\n" SUCCESS)
+run_tpwgts_case(valid-spaces " 0 - 1 : 0 = 0.5 \n" SUCCESS)
+run_tpwgts_case(split-token "0 1=0.5\n" "wgt.*missing")
 run_tpwgts_case(inverted-partition-range "1-0=0.5\n"
   "Invalid partition range")
 run_tpwgts_case(inverted-constraint-range "0:1-0=0.5\n"
@@ -61,3 +67,5 @@ if(IDXTYPEWIDTH EQUAL 32)
 endif()
 run_tpwgts_case(trailing-text "0=0.5junk\n" "trailing characters")
 run_tpwgts_case(missing-weight "0=\n" "wgt.*incorrect")
+run_tpwgts_case(exhausted-with-remainder "0=0.5\n1=0.5\n"
+  "meet or exceed" 3)

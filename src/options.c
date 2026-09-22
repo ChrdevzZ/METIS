@@ -14,15 +14,47 @@
 /*************************************************************************/
 /*! This function creates and sets the run parameters (ctrl_t) */
 /*************************************************************************/
-ctrl_t *SetupCtrl(moptype_et optype, idx_t *options, idx_t ncon, idx_t nparts, 
-            real_t *tpwgts, real_t *ubvec)
+int SetupCtrl(moptype_et optype, idx_t *options, idx_t ncon, idx_t nparts,
+             real_t *tpwgts, real_t *ubvec, ctrl_t **r_ctrl)
 {
+  volatile int sigrval=0;
   idx_t i, j;
-  ctrl_t *ctrl;
+  ctrl_t *cleanup_ctrl;
+  ctrl_t * volatile ctrl=NULL;
+
+  if (r_ctrl == NULL)
+    return METIS_ERROR_INPUT;
+  *r_ctrl = NULL;
+
+  if (ncon <= 0 || nparts <= 0 ||
+      (optype != METIS_OP_PMETIS && optype != METIS_OP_KMETIS &&
+       optype != METIS_OP_OMETIS)) {
+    errno = EINVAL;
+    return METIS_ERROR_INPUT;
+  }
+
+  if (nparts == IDX_MAX || nparts > IDX_MAX/ncon ||
+      (uintmax_t)ncon > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
+      (uintmax_t)ncon > (uintmax_t)SIZE_MAX/sizeof(real_t) ||
+      (uintmax_t)(nparts*ncon) > (uintmax_t)SIZE_MAX/sizeof(real_t)) {
+    errno = EOVERFLOW;
+    return METIS_ERROR_MEMORY;
+  }
+
+  if (!gk_sigtrap()) {
+    errno = ENOMEM;
+    return METIS_ERROR_MEMORY;
+  }
+  METIS_SIGCATCH(sigrval);
+  if (sigrval != 0)
+    goto SIGNAL_ERROR;
 
   ctrl = (ctrl_t *)gk_malloc(sizeof(ctrl_t), "SetupCtrl: ctrl");
-  
+  if (ctrl == NULL)
+    goto MEMORY_ERROR;
+
   memset((void *)ctrl, 0, sizeof(ctrl_t));
+  ctrl->status = METIS_OK;
 
   ctrl->pid = getpid();
 
@@ -75,7 +107,7 @@ ctrl_t *SetupCtrl(moptype_et optype, idx_t *options, idx_t ncon, idx_t nparts,
       break;
 
     default:
-      gk_errexit(SIGERR, "Unknown optype of %d\n", optype);
+      goto INPUT_ERROR;
   }
 
   /* common options */
@@ -92,10 +124,14 @@ ctrl_t *SetupCtrl(moptype_et optype, idx_t *options, idx_t ncon, idx_t nparts,
   ctrl->ncon    = ncon;
   ctrl->nparts  = nparts;
   ctrl->maxvwgt = ismalloc(ncon, 0, "SetupCtrl: maxvwgt");
+  if (ctrl->maxvwgt == NULL)
+    goto MEMORY_ERROR;
 
   /* setup the target partition weights */
   if (ctrl->optype != METIS_OP_OMETIS) {
     ctrl->tpwgts = rsmalloc(nparts*ncon, 0.0, "SetupCtrl: ctrl->tpwgts");
+    if (ctrl->tpwgts == NULL)
+      goto MEMORY_ERROR;
     if (tpwgts) {
       rcopy(nparts*ncon, tpwgts, ctrl->tpwgts);
     }
@@ -110,11 +146,15 @@ ctrl_t *SetupCtrl(moptype_et optype, idx_t *options, idx_t ncon, idx_t nparts,
     /* this is required to allow the pijbm to be defined properly for
        the edge-based refinement during initial partitioning */
     ctrl->tpwgts = rsmalloc(2, .5,  "SetupCtrl: ctrl->tpwgts");
+    if (ctrl->tpwgts == NULL)
+      goto MEMORY_ERROR;
   }
 
 
   /* setup the ubfactors */
   ctrl->ubfactors = rsmalloc(ctrl->ncon, I2RUBFACTOR(ctrl->ufactor), "SetupCtrl: ubfactors");
+  if (ctrl->ubfactors == NULL)
+    goto MEMORY_ERROR;
   if (ubvec)
     rcopy(ctrl->ncon, ubvec, ctrl->ubfactors);
   for (i=0; i<ctrl->ncon; i++)
@@ -124,18 +164,42 @@ ctrl_t *SetupCtrl(moptype_et optype, idx_t *options, idx_t ncon, idx_t nparts,
      Note that for PMETIS/OMETIS routines the memory allocated is more 
      than required as balance multipliers for 2 parts is sufficient. */
   ctrl->pijbm = rmalloc(nparts*ncon, "SetupCtrl: ctrl->pijbm");
+  if (ctrl->pijbm == NULL)
+    goto MEMORY_ERROR;
 
   InitRandom(ctrl->seed);
 
   IFSET(ctrl->dbglvl, METIS_DBG_INFO, PrintCtrl(ctrl));
 
   if (!CheckParams(ctrl)) {
-    FreeCtrl(&ctrl);
-    return NULL;
+    goto INPUT_ERROR;
   }
-  else {
-    return ctrl;
-  }
+
+  *r_ctrl = (ctrl_t *)ctrl;
+  gk_siguntrap();
+  return METIS_OK;
+
+INPUT_ERROR:
+  cleanup_ctrl = (ctrl_t *)ctrl;
+  ctrl = NULL;
+  gk_siguntrap();
+  FreeCtrl(&cleanup_ctrl);
+  errno = EINVAL;
+  return METIS_ERROR_INPUT;
+
+MEMORY_ERROR:
+  sigrval = SIGMEM;
+
+SIGNAL_ERROR:
+  cleanup_ctrl = (ctrl_t *)ctrl;
+  ctrl = NULL;
+  gk_siguntrap();
+  FreeCtrl(&cleanup_ctrl);
+  if (errno == 0)
+    errno = sigrval == SIGMEM ? ENOMEM : EINVAL;
+  if (sigrval != SIGMEM)
+    return METIS_ERROR;
+  return METIS_ERROR_MEMORY;
 }
 
 
@@ -299,6 +363,14 @@ int CheckParams(ctrl_t *ctrl)
   real_t sum;
   mdbglvl_et  dbglvl=METIS_DBG_INFO;
 
+  if ((ctrl->no2hop != 0 && ctrl->no2hop != 1) ||
+      (ctrl->ondisk != 0 && ctrl->ondisk != 1) ||
+      (ctrl->dropedges != 0 && ctrl->dropedges != 1)) {
+    IFSET(dbglvl, METIS_DBG_INFO,
+        printf("Input Error: Incorrect boolean option.\n"));
+    return 0;
+  }
+
   switch (ctrl->optype) {
     case METIS_OP_PMETIS:
       if (ctrl->objtype != METIS_OBJTYPE_CUT) {
@@ -344,7 +416,7 @@ int CheckParams(ctrl_t *ctrl)
 
       for (i=0; i<ctrl->ncon; i++) {
         sum = rsum(ctrl->nparts, ctrl->tpwgts+i, ctrl->ncon);
-        if (sum < 0.99 || sum > 1.01) {
+        if (!isfinite(sum) || sum < 0.99 || sum > 1.01) {
           IFSET(dbglvl, METIS_DBG_INFO, 
               printf("Input Error: Incorrect sum of %"PRREAL" for tpwgts for constraint %"PRIDX".\n", sum, i));
           return 0;
@@ -352,7 +424,8 @@ int CheckParams(ctrl_t *ctrl)
       }
       for (i=0; i<ctrl->ncon; i++) {
         for (j=0; j<ctrl->nparts; j++) {
-          if (ctrl->tpwgts[j*ctrl->ncon+i] <= 0.0) {
+          if (!isfinite(ctrl->tpwgts[j*ctrl->ncon+i]) ||
+              ctrl->tpwgts[j*ctrl->ncon+i] <= 0.0) {
             IFSET(dbglvl, METIS_DBG_INFO, 
                 printf("Input Error: Incorrect tpwgts for partition %"PRIDX" and constraint %"PRIDX".\n", j, i));
             return 0;
@@ -361,7 +434,7 @@ int CheckParams(ctrl_t *ctrl)
       }
 
       for (i=0; i<ctrl->ncon; i++) {
-        if (ctrl->ubfactors[i] <= 1.0) {
+        if (!isfinite(ctrl->ubfactors[i]) || ctrl->ubfactors[i] <= 1.0) {
           IFSET(dbglvl, METIS_DBG_INFO, 
               printf("Input Error: Incorrect ubfactor for constraint %"PRIDX".\n", i));
           return 0;
@@ -395,6 +468,11 @@ int CheckParams(ctrl_t *ctrl)
         IFSET(dbglvl, METIS_DBG_INFO, printf("Input Error: Incorrect niter.\n"));
         return 0;
       }
+      if (ctrl->nIparts != -1 && ctrl->nIparts <= 0) {
+        IFSET(dbglvl, METIS_DBG_INFO,
+            printf("Input Error: Incorrect number of initial partitions.\n"));
+        return 0;
+      }
       if (ctrl->ufactor <= 0) {
         IFSET(dbglvl, METIS_DBG_INFO, printf("Input Error: Incorrect ufactor.\n"));
         return 0;
@@ -422,7 +500,7 @@ int CheckParams(ctrl_t *ctrl)
 
       for (i=0; i<ctrl->ncon; i++) {
         sum = rsum(ctrl->nparts, ctrl->tpwgts+i, ctrl->ncon);
-        if (sum < 0.99 || sum > 1.01) {
+        if (!isfinite(sum) || sum < 0.99 || sum > 1.01) {
           IFSET(dbglvl, METIS_DBG_INFO, 
               printf("Input Error: Incorrect sum of %"PRREAL" for tpwgts for constraint %"PRIDX".\n", sum, i));
           return 0;
@@ -430,7 +508,8 @@ int CheckParams(ctrl_t *ctrl)
       }
       for (i=0; i<ctrl->ncon; i++) {
         for (j=0; j<ctrl->nparts; j++) {
-          if (ctrl->tpwgts[j*ctrl->ncon+i] <= 0.0) {
+          if (!isfinite(ctrl->tpwgts[j*ctrl->ncon+i]) ||
+              ctrl->tpwgts[j*ctrl->ncon+i] <= 0.0) {
             IFSET(dbglvl, METIS_DBG_INFO, 
                 printf("Input Error: Incorrect tpwgts for partition %"PRIDX" and constraint %"PRIDX".\n", j, i));
             return 0;
@@ -439,7 +518,7 @@ int CheckParams(ctrl_t *ctrl)
       }
 
       for (i=0; i<ctrl->ncon; i++) {
-        if (ctrl->ubfactors[i] <= 1.0) {
+        if (!isfinite(ctrl->ubfactors[i]) || ctrl->ubfactors[i] <= 1.0) {
           IFSET(dbglvl, METIS_DBG_INFO, 
               printf("Input Error: Incorrect ubfactor for constraint %"PRIDX".\n", i));
           return 0;
@@ -505,7 +584,7 @@ int CheckParams(ctrl_t *ctrl)
       }
 
       for (i=0; i<ctrl->ncon; i++) {
-        if (ctrl->ubfactors[i] <= 1.0) {
+        if (!isfinite(ctrl->ubfactors[i]) || ctrl->ubfactors[i] <= 1.0) {
           IFSET(dbglvl, METIS_DBG_INFO, 
               printf("Input Error: Incorrect ubfactor for constraint %"PRIDX".\n", i));
           return 0;
@@ -528,8 +607,13 @@ int CheckParams(ctrl_t *ctrl)
 /*************************************************************************/
 void FreeCtrl(ctrl_t **r_ctrl)
 {
-  ctrl_t *ctrl = *r_ctrl;
+  ctrl_t *ctrl;
 
+  if (r_ctrl == NULL || *r_ctrl == NULL)
+    return;
+  ctrl = *r_ctrl;
+
+  graph_CleanupDiskFiles(ctrl);
   FreeWorkSpace(ctrl);
 
   gk_free((void **)&ctrl->tpwgts, &ctrl->pijbm, 

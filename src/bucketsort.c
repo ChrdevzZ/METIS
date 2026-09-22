@@ -26,9 +26,16 @@ void BucketSortKeysInc(ctrl_t *ctrl, idx_t n, idx_t max, idx_t *keys,
   idx_t i, ii;
   idx_t *counts;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
-  counts = iset(max+2, 0, iwspacemalloc(ctrl, max+2));
+  counts = iwspacemalloc(ctrl, max+2);
+  if (counts == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
+  iset(max+2, 0, counts);
 
   for (i=0; i<n; i++)
     counts[keys[i]]++;

@@ -33,9 +33,11 @@ void FM_2WayCutRefine(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, idx_t niter
   idx_t *moved, *swaps, *perm;
   rpq_t *queues[2];
   idx_t higain, mincut, mindiff, origdiff, initcut, newcut, mincutorder, avgvwgt;
+  idx_t curdiff, totalvwgt;
   idx_t tpwgts[2];
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -57,10 +59,25 @@ void FM_2WayCutRefine(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, idx_t niter
   tpwgts[1] = graph->tvwgt[0]-tpwgts[0];
   
   limit   = gk_min(gk_max(0.01*nvtxs, 15), 100);
-  avgvwgt = gk_min((pwgts[0]+pwgts[1])/20, 2*(pwgts[0]+pwgts[1])/nvtxs);
+  totalvwgt = pwgts[0]+pwgts[1];
+  avgvwgt = totalvwgt/20;
+  if (nvtxs > 40) {
+    avgvwgt = 2*(totalvwgt/nvtxs)+
+        (totalvwgt%nvtxs >= nvtxs/2+nvtxs%2);
+  }
 
   queues[0] = rpqCreate(nvtxs);
   queues[1] = rpqCreate(nvtxs);
+  if (moved == NULL || swaps == NULL || perm == NULL ||
+      queues[0] == NULL || queues[1] == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    if (queues[0] != NULL)
+      rpqDestroy(queues[0]);
+    if (queues[1] != NULL)
+      rpqDestroy(queues[1]);
+    WCOREPOP;
+    return;
+  }
 
   IFSET(ctrl->dbglvl, METIS_DBG_REFINE, 
       Print2WayRefineStats(ctrl, graph, ntpwgts, 0, -2));
@@ -99,7 +116,9 @@ void FM_2WayCutRefine(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, idx_t niter
       newcut -= (ed[higain]-id[higain]);
       INC_DEC(pwgts[to], pwgts[from], vwgt[higain]);
 
-      if ((newcut < mincut && iabs(tpwgts[0]-pwgts[0]) <= origdiff+avgvwgt) || 
+      curdiff = iabs(tpwgts[0]-pwgts[0]);
+      if ((newcut < mincut &&
+           (curdiff <= origdiff || curdiff-origdiff <= avgvwgt)) ||
           (newcut == mincut && iabs(tpwgts[0]-pwgts[0]) < mindiff)) {
         mincut  = newcut;
         mindiff = iabs(tpwgts[0]-pwgts[0]);
@@ -216,7 +235,8 @@ void FM_Mc2WayCutRefine(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, idx_t nit
   real_t origbal, minbal, newbal, rgain, ffactor;
   rpq_t **queues;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs    = graph->nvtxs;
   ncon     = graph->ncon;
@@ -239,6 +259,12 @@ void FM_Mc2WayCutRefine(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, idx_t nit
   ubfactors = rwspacemalloc(ctrl, ncon);
   newbalv   = rwspacemalloc(ctrl, ncon);
   minbalv   = rwspacemalloc(ctrl, ncon);
+  if (moved == NULL || swaps == NULL || perm == NULL || qnum == NULL ||
+      ubfactors == NULL || newbalv == NULL || minbalv == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
   limit = gk_min(gk_max(0.01*nvtxs, 25), 150);
 
@@ -249,8 +275,21 @@ void FM_Mc2WayCutRefine(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, idx_t nit
 
   /* Initialize the queues */
   queues = (rpq_t **)wspacemalloc(ctrl, 2*ncon*sizeof(rpq_t *));
-  for (i=0; i<2*ncon; i++) 
+  if (queues == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
+  for (i=0; i<2*ncon; i++) {
     queues[i] = rpqCreate(nvtxs);
+    if (queues[i] == NULL) {
+      ctrl->status = METIS_ERROR_MEMORY;
+      while (i>0)
+        rpqDestroy(queues[--i]);
+      WCOREPOP;
+      return;
+    }
+  }
   for (i=0; i<nvtxs; i++)
     qnum[i] = iargmax_nrm(ncon, vwgt+i*ncon, invtvwgt);
 

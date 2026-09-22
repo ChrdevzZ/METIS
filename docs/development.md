@@ -33,8 +33,13 @@ fixture also runs through the opt-in integration suite, covering missing
 sources, offline overrides and parent FetchContent declarations.
 
 Program-specific regressions cover strict target-weight parsing and the
-MOVEINFO-only single-candidate diagnostic paths. They require the corresponding
-METIS programs; a library-only suite does not register those command tests.
+MOVEINFO-only single-candidate diagnostic paths. The ordering fixture uses a
+fill-in operation count above the 32-bit range so reporting remains independent
+of host pointer width. Input fixtures also cover
+nonpositive edge weights, pure self-loop repair, single-stream graph/mesh reads,
+read/write failure status and output replacement/rollback. They require the
+corresponding METIS programs; a library-only suite does not register those
+command tests.
 
 The performance-script fixture owns a marked directory below the test binary
 tree. Direct invocations must use a new directory or one already marked by the
@@ -44,7 +49,33 @@ rejected before cleanup. POSIX systems do not require the MSYS2 `cygpath` tool.
 The API regression also checks node-refinement balance decisions with unchanged
 separator weight. Its 64-bit fixture uses partition-weight differences beyond
 the C `int` range so that accidental narrowing cannot silently reject a valid
-balance improvement.
+balance improvement. Legal aggregate vertex weights at `IDX_MAX` and maximum
+`NITER`, `NIPARTS` and `UFACTOR` options exercise exact balance thresholds,
+bounded iteration and count arithmetic, and saturated nonnegative real-to-index
+thresholds without changing representable-range decisions.
+The API fixture also enables the private block-partitioning debug path on a
+low-degree graph and verifies that multi-constraint input continues through
+the supported partitioner.
+
+Allocation-failure fixtures exercise control/graph/workspace construction,
+neighbor-pool exhaustion, derived size overflow, both numbering modes and
+caller-owned graph/mesh outputs. Each covered public failure must return the
+documented status, restore temporary input numbering and leave result pointers
+null or unchanged as required by that API.
+Mesh conversion checks both returned-array `malloc` failures and rejects
+aliased output slots before changing input numbering.
+They also cover failed workspace marker insertion, markerless pop and the
+post-partition node-element and row-induction allocation points in mesh
+partitioning; both caller partition arrays and the objective remain unchanged
+on failure.
+Minimum-cover failure injection covers every matching and
+decomposition allocation and requires the caller's cover to remain unchanged.
+Application fault injection checks that connectivity and post-partition
+statistics return an allocation error after releasing every partially
+allocated work array. A failed statistics report must produce no partial
+success output; reporting begins only after every fallible calculation and
+allocation succeeds. Empty induced vertex sets must return zero components
+without indexing beyond the graph.
 
 Enable `GKLIB_BUILD_TESTING=ON` when a source-provider METIS build should also
 register GKlib's deterministic allocation-failure checks. They require mcore
@@ -52,7 +83,17 @@ capacity growth to commit transactionally, failed tracked reallocations to
 retain the original record, partial constructors to clean up, and marker-rejected
 frees or mcore cleanup to retain ownership records and caller handles. These
 invariants preserve the state needed by METIS when a `SIGMEM` recovery point
-converts allocation failure into `METIS_ERROR_MEMORY`.
+converts allocation failure into `METIS_ERROR_MEMORY`. The constructor fixture
+also checks every initial node-bisection and K-way refinement allocation for
+both cut and volume objectives. Failed replacement must retain the previous
+graph refinement state, including the volume-mode cut-info alias. Coarse-graph
+construction rejects invalid dimensions and unrepresentable counts before any
+allocation or finer/coarser link is changed. The three retained matching
+strategies also stop when their shared bucket-sort workspace cannot be
+allocated, before reading its uninitialized permutation. Minimum degree
+ordering checks its derived workspace length before changing graph numbering;
+the public failure fixture verifies the error status, output preservation and
+restoration of one-based input.
 
 The Python developer checks also exercise runtime copying, unchanged-file
 timestamps, missing and empty inputs, and bounded recovery from a transient

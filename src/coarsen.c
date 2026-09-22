@@ -21,7 +21,7 @@
 /*************************************************************************/
 graph_t *CoarsenGraph(ctrl_t *ctrl, graph_t *graph)
 {
-  idx_t i, eqewgts, level=0;
+  idx_t i, eqewgts, level=0, matchstatus;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->CoarsenTmr));
 
@@ -42,23 +42,29 @@ graph_t *CoarsenGraph(ctrl_t *ctrl, graph_t *graph)
 
     /* allocate memory for cmap, if it has not already been done due to
        multiple cuts */
-    if (graph->cmap == NULL)
+    if (graph->cmap == NULL) {
       graph->cmap = imalloc(graph->nvtxs, "CoarsenGraph: graph->cmap");
+      if (graph->cmap == NULL)
+        goto MEMORY_ERROR;
+    }
 
     /* determine which matching scheme you will use */
     switch (ctrl->ctype) {
       case METIS_CTYPE_RM:
-        Match_RM(ctrl, graph);
+        matchstatus = Match_RM(ctrl, graph);
         break;
       case METIS_CTYPE_SHEM:
         if (eqewgts || graph->nedges == 0)
-          Match_RM(ctrl, graph);
+          matchstatus = Match_RM(ctrl, graph);
         else
-          Match_SHEM(ctrl, graph);
+          matchstatus = Match_SHEM(ctrl, graph);
         break;
       default:
         gk_errexit(SIGERR, "Unknown ctype: %d\n", ctrl->ctype);
+        matchstatus = -1;
     }
+    if (matchstatus < 0 || graph->coarser == NULL)
+      goto MEMORY_ERROR;
 
     graph_WriteToDisk(ctrl, graph);
 
@@ -66,7 +72,14 @@ graph_t *CoarsenGraph(ctrl_t *ctrl, graph_t *graph)
     eqewgts = 0;
     level++;
 
-    ASSERT(CheckGraph(graph, 0, 1));
+#if GKLIB_ASSERTIONS_ENABLED
+    errno = 0;
+    if (!CheckGraph(graph, 0, 1)) {
+      if (errno == ENOMEM || errno == EOVERFLOW)
+        goto MEMORY_ERROR;
+      ASSERT(0);
+    }
+#endif
 
   } while (graph->nvtxs > ctrl->CoarsenTo && 
            graph->nvtxs < COARSEN_FRACTION*graph->finer->nvtxs && 
@@ -76,6 +89,11 @@ graph_t *CoarsenGraph(ctrl_t *ctrl, graph_t *graph)
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->CoarsenTmr));
 
   return graph;
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->CoarsenTmr));
+  return NULL;
 }
 
 
@@ -86,7 +104,7 @@ graph_t *CoarsenGraph(ctrl_t *ctrl, graph_t *graph)
 /*************************************************************************/
 graph_t *CoarsenGraphNlevels(ctrl_t *ctrl, graph_t *graph, idx_t nlevels)
 {
-  idx_t i, eqewgts, level;
+  idx_t i, eqewgts, level, matchstatus;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->CoarsenTmr));
 
@@ -107,30 +125,43 @@ graph_t *CoarsenGraphNlevels(ctrl_t *ctrl, graph_t *graph, idx_t nlevels)
 
     /* allocate memory for cmap, if it has not already been done due to
        multiple cuts */
-    if (graph->cmap == NULL)
+    if (graph->cmap == NULL) {
       graph->cmap = imalloc(graph->nvtxs, "CoarsenGraph: graph->cmap");
+      if (graph->cmap == NULL)
+        goto MEMORY_ERROR;
+    }
 
     /* determine which matching scheme you will use */
     switch (ctrl->ctype) {
       case METIS_CTYPE_RM:
-        Match_RM(ctrl, graph);
+        matchstatus = Match_RM(ctrl, graph);
         break;
       case METIS_CTYPE_SHEM:
         if (eqewgts || graph->nedges == 0)
-          Match_RM(ctrl, graph);
+          matchstatus = Match_RM(ctrl, graph);
         else
-          Match_SHEM(ctrl, graph);
+          matchstatus = Match_SHEM(ctrl, graph);
         break;
       default:
         gk_errexit(SIGERR, "Unknown ctype: %d\n", ctrl->ctype);
+        matchstatus = -1;
     }
+    if (matchstatus < 0 || graph->coarser == NULL)
+      goto MEMORY_ERROR;
 
     graph_WriteToDisk(ctrl, graph);
 
     graph = graph->coarser;
     eqewgts = 0;
 
-    ASSERT(CheckGraph(graph, 0, 1));
+#if GKLIB_ASSERTIONS_ENABLED
+    errno = 0;
+    if (!CheckGraph(graph, 0, 1)) {
+      if (errno == ENOMEM || errno == EOVERFLOW)
+        goto MEMORY_ERROR;
+      ASSERT(0);
+    }
+#endif
 
     if (graph->nvtxs < ctrl->CoarsenTo || 
         graph->nvtxs > COARSEN_FRACTION*graph->finer->nvtxs || 
@@ -142,6 +173,11 @@ graph_t *CoarsenGraphNlevels(ctrl_t *ctrl, graph_t *graph, idx_t nlevels)
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->CoarsenTmr));
 
   return graph;
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->CoarsenTmr));
+  return NULL;
 }
 
 
@@ -158,7 +194,8 @@ idx_t Match_RM(ctrl_t *ctrl, graph_t *graph)
   idx_t *match, *cmap, *degrees, *perm, *tperm;
   size_t nunmatched=0;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return -1;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->MatchTmr));
 
@@ -172,10 +209,13 @@ idx_t Match_RM(ctrl_t *ctrl, graph_t *graph)
 
   maxvwgt  = ctrl->maxvwgt;
 
-  match   = iset(nvtxs, UNMATCHED, iwspacemalloc(ctrl, nvtxs));
+  match   = iwspacemalloc(ctrl, nvtxs);
   perm    = iwspacemalloc(ctrl, nvtxs);
   tperm   = iwspacemalloc(ctrl, nvtxs);
   degrees = iwspacemalloc(ctrl, nvtxs);
+  if (match == NULL || perm == NULL || tperm == NULL || degrees == NULL)
+    goto MEMORY_ERROR;
+  iset(nvtxs, UNMATCHED, match);
 
   /* Determine a "random" traversal order that is biased towards 
      low-degree vertices */
@@ -187,6 +227,8 @@ idx_t Match_RM(ctrl_t *ctrl, graph_t *graph)
     degrees[i] = (bnum > avgdegree ? avgdegree : bnum);
   }
   BucketSortKeysInc(ctrl, nvtxs, avgdegree, degrees, tperm, perm);
+  if (ctrl->status != METIS_OK)
+    goto MEMORY_ERROR;
 
 
   /* Traverse the vertices and compute the matching */
@@ -215,14 +257,15 @@ idx_t Match_RM(ctrl_t *ctrl, graph_t *graph)
             /* single constraint version */
             for (j=xadj[i]; j<xadj[i+1]; j++) {
               k = adjncy[j];
-              if (match[k] == UNMATCHED && vwgt[i]+vwgt[k] <= maxvwgt[0]) {
+              if (match[k] == UNMATCHED &&
+                  vwgt[k] <= maxvwgt[0]-vwgt[i]) {
                 maxidx = k;
                 break;
               }
             }
 
             /* If it did not match, record for a 2-hop matching. */
-            if (maxidx == i && 2*vwgt[i] < maxvwgt[0]) {
+            if (maxidx == i && vwgt[i] < maxvwgt[0]-vwgt[i]) {
               nunmatched++;
               maxidx = UNMATCHED;
             }
@@ -260,6 +303,8 @@ idx_t Match_RM(ctrl_t *ctrl, graph_t *graph)
   /* see if a 2-hop matching is required/allowed */
   if (!ctrl->no2hop && nunmatched > UNMATCHEDFOR2HOP*nvtxs) 
     cnvtxs = Match_2Hop(ctrl, graph, perm, match, cnvtxs, nunmatched);
+  if (cnvtxs < 0)
+    goto MEMORY_ERROR;
 
 
   /* match the final unmatched vertices with themselves and reorder the vertices 
@@ -275,13 +320,20 @@ idx_t Match_RM(ctrl_t *ctrl, graph_t *graph)
     }
   }
 
-  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
+  if (CreateCoarseGraph(ctrl, graph, cnvtxs, match) != METIS_OK)
+    goto MEMORY_ERROR;
 
-  CreateCoarseGraph(ctrl, graph, cnvtxs, match);
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
 
   WCOREPOP;
 
   return cnvtxs;
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
+  WCOREPOP;
+  return -1;
 }
 
 
@@ -299,7 +351,8 @@ idx_t Match_SHEM(ctrl_t *ctrl, graph_t *graph)
   idx_t *match, *cmap, *degrees, *perm, *tperm;
   size_t nunmatched=0;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return -1;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->MatchTmr));
 
@@ -313,10 +366,13 @@ idx_t Match_SHEM(ctrl_t *ctrl, graph_t *graph)
 
   maxvwgt  = ctrl->maxvwgt;
 
-  match   = iset(nvtxs, UNMATCHED, iwspacemalloc(ctrl, nvtxs));
+  match   = iwspacemalloc(ctrl, nvtxs);
   perm    = iwspacemalloc(ctrl, nvtxs);
   tperm   = iwspacemalloc(ctrl, nvtxs);
   degrees = iwspacemalloc(ctrl, nvtxs);
+  if (match == NULL || perm == NULL || tperm == NULL || degrees == NULL)
+    goto MEMORY_ERROR;
+  iset(nvtxs, UNMATCHED, match);
 
   /* Determine a "random" traversal order that is biased towards low-degree vertices */
   irandArrayPermute(nvtxs, tperm, nvtxs/8, 1);
@@ -327,6 +383,8 @@ idx_t Match_SHEM(ctrl_t *ctrl, graph_t *graph)
     degrees[i] = (bnum > avgdegree ? avgdegree : bnum);
   }
   BucketSortKeysInc(ctrl, nvtxs, avgdegree, degrees, tperm, perm);
+  if (ctrl->status != METIS_OK)
+    goto MEMORY_ERROR;
 
 
   /* Traverse the vertices and compute the matching */
@@ -357,14 +415,14 @@ idx_t Match_SHEM(ctrl_t *ctrl, graph_t *graph)
             for (j=xadj[i]; j<xadj[i+1]; j++) {
               k = adjncy[j];
               if (maxwgt < adjwgt[j] && match[k] == UNMATCHED &&
-                  vwgt[i]+vwgt[k] <= maxvwgt[0]) {
+                  vwgt[k] <= maxvwgt[0]-vwgt[i]) {
                 maxidx = k;
                 maxwgt = adjwgt[j];
               }
             }
 
             /* If it did not match, record for a 2-hop matching. */
-            if (maxidx == i && 2*vwgt[i] < maxvwgt[0]) {
+            if (maxidx == i && vwgt[i] < maxvwgt[0]-vwgt[i]) {
               nunmatched++;
               maxidx = UNMATCHED;
             }
@@ -406,6 +464,8 @@ idx_t Match_SHEM(ctrl_t *ctrl, graph_t *graph)
   /* see if a 2-hop matching is required/allowed */
   if (!ctrl->no2hop && nunmatched > UNMATCHEDFOR2HOP*nvtxs) 
     cnvtxs = Match_2Hop(ctrl, graph, perm, match, cnvtxs, nunmatched);
+  if (cnvtxs < 0)
+    goto MEMORY_ERROR;
 
 
   /* match the final unmatched vertices with themselves and reorder the vertices 
@@ -421,13 +481,20 @@ idx_t Match_SHEM(ctrl_t *ctrl, graph_t *graph)
     }
   }
 
-  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
+  if (CreateCoarseGraph(ctrl, graph, cnvtxs, match) != METIS_OK)
+    goto MEMORY_ERROR;
 
-  CreateCoarseGraph(ctrl, graph, cnvtxs, match);
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
 
   WCOREPOP;
 
   return cnvtxs;
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
+  WCOREPOP;
+  return -1;
 }
 
 
@@ -440,9 +507,15 @@ idx_t Match_2Hop(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
 {
 
   cnvtxs = Match_2HopAny(ctrl, graph, perm, match, cnvtxs, &nunmatched, 2);
+  if (cnvtxs < 0)
+    return -1;
   cnvtxs = Match_2HopAll(ctrl, graph, perm, match, cnvtxs, &nunmatched, 64);
+  if (cnvtxs < 0)
+    return -1;
   if (nunmatched > 1.5*UNMATCHEDFOR2HOP*graph->nvtxs) 
     cnvtxs = Match_2HopAny(ctrl, graph, perm, match, cnvtxs, &nunmatched, 3);
+  if (cnvtxs < 0)
+    return -1;
   if (nunmatched > 2.0*UNMATCHEDFOR2HOP*graph->nvtxs) 
     cnvtxs = Match_2HopAny(ctrl, graph, perm, match, cnvtxs, &nunmatched, graph->nvtxs);
 
@@ -458,7 +531,7 @@ idx_t Match_2Hop(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
     between the adjacency lists of the vertices. */
 /**************************************************************************/
 idx_t Match_2HopAny(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match, 
-          idx_t cnvtxs, size_t *r_nunmatched, size_t maxdegree)
+          idx_t cnvtxs, size_t *r_nunmatched, idx_t maxdegree)
 {
   idx_t i, pi, ii, j, jj, k, nvtxs;
   idx_t *xadj, *adjncy, *colptr, *rowind;
@@ -477,8 +550,14 @@ idx_t Match_2HopAny(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
   /*IFSET(ctrl->dbglvl, METIS_DBG_COARSEN, printf("IN: nunmatched: %zu\t", nunmatched)); */
 
   /* create the inverted index */
-  WCOREPUSH;
-  colptr = iset(nvtxs, 0, iwspacemalloc(ctrl, nvtxs+1));
+  if (!WCOREPUSH) {
+    IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->Aux3Tmr));
+    return -1;
+  }
+  colptr = iwspacemalloc(ctrl, nvtxs+1);
+  if (colptr == NULL)
+    goto MEMORY_ERROR;
+  iset(nvtxs, 0, colptr);
   for (i=0; i<nvtxs; i++) {
     if (match[i] == UNMATCHED && xadj[i+1]-xadj[i] < maxdegree) {
       for (j=xadj[i]; j<xadj[i+1]; j++)
@@ -488,6 +567,8 @@ idx_t Match_2HopAny(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
   MAKECSR(i, nvtxs, colptr);
 
   rowind = iwspacemalloc(ctrl, colptr[nvtxs]);
+  if (rowind == NULL)
+    goto MEMORY_ERROR;
   for (pi=0; pi<nvtxs; pi++) {
     i = perm[pi];
     if (match[i] == UNMATCHED && xadj[i+1]-xadj[i] < maxdegree) {
@@ -525,6 +606,12 @@ idx_t Match_2HopAny(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
 
   *r_nunmatched = nunmatched;
   return cnvtxs;
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  WCOREPOP;
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->Aux3Tmr));
+  return -1;
 }
 
 
@@ -537,13 +624,13 @@ idx_t Match_2HopAny(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
  */
 /**************************************************************************/
 idx_t Match_2HopAll(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match, 
-          idx_t cnvtxs, size_t *r_nunmatched, size_t maxdegree)
+          idx_t cnvtxs, size_t *r_nunmatched, idx_t maxdegree)
 {
-  idx_t i, pi, pk, ii, j, jj, k, nvtxs, mask, idegree;
+  idx_t i, pi, pk, ii, j, jj, k, nvtxs, mask, idegree, ncand;
   idx_t *xadj, *adjncy;
   idx_t *cmap, *mark;
   ikv_t *keys;
-  size_t nunmatched, ncand;
+  size_t nunmatched;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->Aux3Tmr));
 
@@ -557,10 +644,17 @@ idx_t Match_2HopAll(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
 
   /*IFSET(ctrl->dbglvl, METIS_DBG_COARSEN, printf("IN: nunmatched: %zu\t", nunmatched)); */
 
-  WCOREPUSH;
+  if (!WCOREPUSH) {
+    IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->Aux3Tmr));
+    return -1;
+  }
 
   /* collapse vertices with identical adjacency lists */
-  keys = ikvwspacemalloc(ctrl, nunmatched);
+  if ((uintmax_t)nunmatched > (uintmax_t)IDX_MAX)
+    goto MEMORY_ERROR;
+  keys = ikvwspacemalloc(ctrl, (idx_t)nunmatched);
+  if (keys == NULL)
+    goto MEMORY_ERROR;
   for (ncand=0, pi=0; pi<nvtxs; pi++) {
     i = perm[pi];
     idegree = xadj[i+1]-xadj[i];
@@ -574,7 +668,10 @@ idx_t Match_2HopAll(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
   }
   ikvsorti(ncand, keys);
 
-  mark = iset(nvtxs, 0, iwspacemalloc(ctrl, nvtxs));
+  mark = iwspacemalloc(ctrl, nvtxs);
+  if (mark == NULL)
+    goto MEMORY_ERROR;
+  iset(nvtxs, 0, mark);
   for (pi=0; pi<ncand; pi++) {
     i = keys[pi].val;
     if (match[i] != UNMATCHED)
@@ -608,12 +705,18 @@ idx_t Match_2HopAll(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
   }
   WCOREPOP;
 
-  /*IFSET(ctrl->dbglvl, METIS_DBG_COARSEN, printf("OUT: ncand: %zu, nunmatched: %zu\n", ncand, nunmatched)); */
+  /*IFSET(ctrl->dbglvl, METIS_DBG_COARSEN, printf("OUT: ncand: %"PRIDX", nunmatched: %zu\n", ncand, nunmatched)); */
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->Aux3Tmr));
 
   *r_nunmatched = nunmatched;
   return cnvtxs;
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  WCOREPOP;
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->Aux3Tmr));
+  return -1;
 }
 
 
@@ -631,7 +734,8 @@ idx_t Match_JC(ctrl_t *ctrl, graph_t *graph)
   idx_t mytwgt, xtwgt, ctwgt;
   real_t bscore, score;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return -1;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->MatchTmr));
 
@@ -645,10 +749,13 @@ idx_t Match_JC(ctrl_t *ctrl, graph_t *graph)
 
   maxvwgt  = ctrl->maxvwgt;
 
-  match   = iset(nvtxs, UNMATCHED, iwspacemalloc(ctrl, nvtxs));
+  match   = iwspacemalloc(ctrl, nvtxs);
   perm    = iwspacemalloc(ctrl, nvtxs);
   tperm   = iwspacemalloc(ctrl, nvtxs);
   degrees = iwspacemalloc(ctrl, nvtxs);
+  if (match == NULL || perm == NULL || tperm == NULL || degrees == NULL)
+    goto MEMORY_ERROR;
+  iset(nvtxs, UNMATCHED, match);
 
   irandArrayPermute(nvtxs, tperm, nvtxs/8, 1);
 
@@ -658,6 +765,8 @@ idx_t Match_JC(ctrl_t *ctrl, graph_t *graph)
     degrees[i] = (bnum > avgdegree ? avgdegree : bnum);
   }
   BucketSortKeysInc(ctrl, nvtxs, avgdegree, degrees, tperm, perm);
+  if (ctrl->status != METIS_OK)
+    goto MEMORY_ERROR;
 
   /* point to the wspace vectors that are not needed any more */
   vec    = tperm;
@@ -700,7 +809,8 @@ idx_t Match_JC(ctrl_t *ctrl, graph_t *graph)
 #ifdef XXX
               for (j=xadj[i]; j<xadj[i+1]; j++) {
                 ii = adjncy[j];
-                if (marker[ii] == i || match[ii] != UNMATCHED || vwgt[i]+vwgt[ii] > maxvwgt[0])
+                if (marker[ii] == i || match[ii] != UNMATCHED ||
+                    vwgt[ii] > maxvwgt[0]-vwgt[i])
                   continue;
 
                 ctwgt = xtwgt = 0;
@@ -728,7 +838,8 @@ idx_t Match_JC(ctrl_t *ctrl, graph_t *graph)
                 for (jj=xadj[ii]; jj<xadj[ii+1]; jj++) {
                   iii = adjncy[jj];
   
-                  if (marker[iii] == i || match[iii] != UNMATCHED || vwgt[i]+vwgt[iii] > maxvwgt[0])
+                  if (marker[iii] == i || match[iii] != UNMATCHED ||
+                      vwgt[iii] > maxvwgt[0]-vwgt[i])
                     continue;
   
                   ctwgt = xtwgt = 0;
@@ -791,13 +902,20 @@ idx_t Match_JC(ctrl_t *ctrl, graph_t *graph)
     }
   }
 
-  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
+  if (CreateCoarseGraph(ctrl, graph, cnvtxs, match) != METIS_OK)
+    goto MEMORY_ERROR;
 
-  CreateCoarseGraph(ctrl, graph, cnvtxs, match);
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
 
   WCOREPOP;
 
   return cnvtxs;
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
+  WCOREPOP;
+  return -1;
 }
 
 
@@ -824,7 +942,7 @@ void PrintCGraphStats(ctrl_t *ctrl, graph_t *graph)
     to do duplicate detection.
  */
 /*************************************************************************/
-void CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs, 
+int CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
          idx_t *match)
 {
   idx_t j, jj, k, kk, l, m, istart, iend, nvtxs, nedges, ncon, 
@@ -832,12 +950,14 @@ void CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
   idx_t *xadj, *vwgt, *vsize, *adjncy, *adjwgt;
   idx_t *cmap, *htable, *dtable;
   idx_t *cxadj, *cvwgt, *cvsize, *cadjncy, *cadjwgt;
-  graph_t *cgraph;
+  graph_t *cgraph=NULL;
   int dovsize, dropedges;
   idx_t cv, nkeys, droppedewgt;
-  idx_t *keys=NULL, *medianewgts=NULL, *noise=NULL;
+  idx_t *medianewgts=NULL, *medianenoise=NULL, *noise=NULL;
+  ikv_t *keys=NULL;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return METIS_ERROR_MEMORY;
 
   dovsize   = (ctrl->objtype == METIS_OBJTYPE_VOL ? 1 : 0);
   dropedges = ctrl->dropedges;
@@ -859,11 +979,18 @@ void CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
   if (dropedges) {
     for (nkeys=0, v=0; v<nvtxs; v++) 
       nkeys = gk_max(nkeys, xadj[v+1]-xadj[v]);
+    if (nkeys > (IDX_MAX-1)/2)
+      goto MEMORY_ERROR;
     nkeys = 2*nkeys+1;
 
-    keys        = iwspacemalloc(ctrl, nkeys);
+    keys        = ikvwspacemalloc(ctrl, nkeys);
     noise       = iwspacemalloc(ctrl, cnvtxs);
-    medianewgts = iset(cnvtxs, -1, iwspacemalloc(ctrl, cnvtxs));
+    medianewgts = iwspacemalloc(ctrl, cnvtxs);
+    medianenoise = iwspacemalloc(ctrl, cnvtxs);
+    if (keys == NULL || noise == NULL || medianewgts == NULL ||
+        medianenoise == NULL)
+      goto MEMORY_ERROR;
+    iset(cnvtxs, -1, medianewgts);
 
     for (v=0; v<cnvtxs; v++) 
       noise[v] = irandInRange(128);
@@ -871,14 +998,20 @@ void CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
 
   /* Initialize the coarser graph */
   cgraph   = SetupCoarseGraph(graph, cnvtxs, dovsize);
+  if (cgraph == NULL)
+    goto MEMORY_ERROR;
   cxadj    = cgraph->xadj;
   cvwgt    = cgraph->vwgt;
   cvsize   = cgraph->vsize;
   cadjncy  = cgraph->adjncy;
   cadjwgt  = cgraph->adjwgt;
 
-  htable = iset(mask+1, -1, iwspacemalloc(ctrl, mask+1));   /* hash table */
-  dtable = iset(cnvtxs, -1, iwspacemalloc(ctrl, cnvtxs));   /* direct table */
+  htable = iwspacemalloc(ctrl, mask+1);   /* hash table */
+  dtable = iwspacemalloc(ctrl, cnvtxs);   /* direct table */
+  if (htable == NULL || dtable == NULL)
+    goto MEMORY_ERROR;
+  iset(mask+1, -1, htable);
+  iset(cnvtxs, -1, dtable);
 
   cxadj[0] = cnvtxs = cnedges = 0;
   for (v=0; v<nvtxs; v++) {
@@ -909,7 +1042,8 @@ void CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
 
 
     /* take care of the edges */ 
-    if ((xadj[v+1]-xadj[v] + xadj[u+1]-xadj[u]) < (mask>>2)) { /* use mask */
+    if ((uintmax_t)(xadj[v+1]-xadj[v])+
+        (uintmax_t)(xadj[u+1]-xadj[u]) < (uintmax_t)(mask>>2)) { /* use mask */
       /* put the ID of the contracted node itself at the start, so that it can be 
        * removed easily */
       htable[cnvtxs&mask] = 0;
@@ -1006,16 +1140,23 @@ void CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
     }
 
 
-    /* Determine the median weight of the incident edges, which will be used
-       to keep an edge (u, v) iff wgt(u, v) >= min(medianewgts[u], medianewgts[v]) */
+    /* Determine the median weight/noise pair of the incident edges, which will
+       be used to decide whether to keep an edge. */
     if (dropedges) {
       ASSERTP(nedges < nkeys, ("%"PRIDX", %"PRIDX"\n", nkeys, nedges));
-      medianewgts[cnvtxs] = 8;  /* default for island nodes */ 
+      medianewgts[cnvtxs] = 0;  /* default for island nodes */
+      medianenoise[cnvtxs] = 8;
       if (nedges > 0) {
-        for (j=0; j<nedges; j++) 
-          keys[j] = (cadjwgt[j]<<8) + noise[cnvtxs] + noise[cadjncy[j]];
-        isortd(nedges, keys);
-        medianewgts[cnvtxs] = keys[gk_min(nedges-1, ((xadj[v+1]-xadj[v] + xadj[u+1]-xadj[u])>>1))];
+        for (j=0; j<nedges; j++) {
+          keys[j].key = cadjwgt[j];
+          keys[j].val = noise[cnvtxs] + noise[cadjncy[j]];
+        }
+        ikvsortii(nedges, keys);
+        k = gk_min(nedges-1,
+            (idx_t)(((uintmax_t)(xadj[v+1]-xadj[v])+
+                     (uintmax_t)(xadj[u+1]-xadj[u]))>>1));
+        medianewgts[cnvtxs] = keys[nedges-1-k].key;
+        medianenoise[cnvtxs] = keys[nedges-1-k].val;
       }
     }
 
@@ -1041,7 +1182,12 @@ void CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
         v = cadjncy[j];
         ASSERTP(medianewgts[u] >= 0, ("%"PRIDX" %"PRIDX"\n", u, medianewgts[u]));
         ASSERTP(medianewgts[v] >= 0, ("%"PRIDX" %"PRIDX" %"PRIDX"\n", v, medianewgts[v], cnvtxs));
-        if ((cadjwgt[j]<<8) + noise[u] + noise[v] >= gk_min(medianewgts[u], medianewgts[v])) {
+        k = (medianewgts[u] < medianewgts[v] ||
+             (medianewgts[u] == medianewgts[v] &&
+              medianenoise[u] <= medianenoise[v]) ? u : v);
+        if (cadjwgt[j] > medianewgts[k] ||
+            (cadjwgt[j] == medianewgts[k] &&
+             noise[u]+noise[v] >= medianenoise[k])) {
           cadjncy[cnedges]   = cadjncy[j];
           cadjwgt[cnedges++] = cadjwgt[j];
         }
@@ -1067,6 +1213,17 @@ void CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->ContractTmr));
 
   WCOREPOP;
+  return METIS_OK;
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  if (cgraph != NULL) {
+    graph->coarser = NULL;
+    FreeGraph(&cgraph);
+  }
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->ContractTmr));
+  WCOREPOP;
+  return METIS_ERROR_MEMORY;
 }
 
 
@@ -1076,32 +1233,96 @@ void CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
 /*************************************************************************/
 graph_t *SetupCoarseGraph(graph_t *graph, idx_t cnvtxs, int dovsize)
 {
-  graph_t *cgraph;
+  graph_t *cgraph=NULL;
+  int sigrval;
+  size_t scnvtxs, snedges, sncon, nvwgt;
+
+  if (graph == NULL || cnvtxs < 0 || graph->ncon <= 0 ||
+      graph->nedges < 0) {
+    errno = EINVAL;
+    return NULL;
+  }
+  if (cnvtxs > IDX_MAX/graph->ncon ||
+      (uintmax_t)cnvtxs > (uintmax_t)SIZE_MAX ||
+      (uintmax_t)graph->nedges > (uintmax_t)SIZE_MAX ||
+      (uintmax_t)graph->ncon > (uintmax_t)SIZE_MAX) {
+    errno = EOVERFLOW;
+    return NULL;
+  }
+  scnvtxs = (size_t)cnvtxs;
+  snedges = (size_t)graph->nedges;
+  sncon = (size_t)graph->ncon;
+  if (scnvtxs == SIZE_MAX || snedges == SIZE_MAX ||
+      scnvtxs+1 > SIZE_MAX/sizeof(idx_t) ||
+      snedges+1 > SIZE_MAX/sizeof(idx_t) ||
+      sncon > SIZE_MAX/sizeof(idx_t) ||
+      sncon > SIZE_MAX/sizeof(real_t) ||
+      sncon > SIZE_MAX/(scnvtxs == 0 ? 1 : scnvtxs)) {
+    errno = EOVERFLOW;
+    return NULL;
+  }
+  nvwgt = sncon*scnvtxs;
+  if (nvwgt > SIZE_MAX/sizeof(idx_t)) {
+    errno = EOVERFLOW;
+    return NULL;
+  }
 
   cgraph = CreateGraph();
+  if (cgraph == NULL)
+    goto MEMORY_ERROR;
 
   cgraph->nvtxs = cnvtxs;
   cgraph->ncon  = graph->ncon;
-
-  cgraph->finer  = graph;
-  graph->coarser = cgraph;
 
   /* Allocate memory for the coarser graph.
      NOTE: The +1 in the adjwgt/adjncy is to allow the optimization of self-loop
            detection by adding ahead of time the self-loop. That optimization
            requires a +1 adjncy/adjwgt array for the limit case where the 
            coarser graph is of the same size of the previous graph. */
-  cgraph->xadj     = imalloc(cnvtxs+1, "SetupCoarseGraph: xadj");
-  cgraph->adjncy   = imalloc(graph->nedges+1,   "SetupCoarseGraph: adjncy");
-  cgraph->adjwgt   = imalloc(graph->nedges+1,   "SetupCoarseGraph: adjwgt");
-  cgraph->vwgt     = imalloc(cgraph->ncon*cnvtxs, "SetupCoarseGraph: vwgt");
-  cgraph->tvwgt    = imalloc(cgraph->ncon, "SetupCoarseGraph: tvwgt");
-  cgraph->invtvwgt = rmalloc(cgraph->ncon, "SetupCoarseGraph: invtvwgt");
+  cgraph->xadj = iMallocNoSignal(scnvtxs+1,
+      "SetupCoarseGraph: xadj", &sigrval);
+  if (cgraph->xadj == NULL)
+    goto MEMORY_ERROR;
+  cgraph->adjncy = iMallocNoSignal(snedges+1,
+      "SetupCoarseGraph: adjncy", &sigrval);
+  if (cgraph->adjncy == NULL)
+    goto MEMORY_ERROR;
+  cgraph->adjwgt = iMallocNoSignal(snedges+1,
+      "SetupCoarseGraph: adjwgt", &sigrval);
+  if (cgraph->adjwgt == NULL)
+    goto MEMORY_ERROR;
+  cgraph->vwgt = iMallocNoSignal(nvwgt,
+      "SetupCoarseGraph: vwgt", &sigrval);
+  if (cgraph->vwgt == NULL)
+    goto MEMORY_ERROR;
+  cgraph->tvwgt = iMallocNoSignal(sncon,
+      "SetupCoarseGraph: tvwgt", &sigrval);
+  if (cgraph->tvwgt == NULL)
+    goto MEMORY_ERROR;
+  cgraph->invtvwgt = rMallocNoSignal(sncon,
+      "SetupCoarseGraph: invtvwgt", &sigrval);
+  if (cgraph->xadj == NULL || cgraph->adjncy == NULL ||
+      cgraph->adjwgt == NULL || cgraph->vwgt == NULL ||
+      cgraph->tvwgt == NULL || cgraph->invtvwgt == NULL)
+    goto MEMORY_ERROR;
 
-  if (dovsize)
-    cgraph->vsize = imalloc(cnvtxs,   "SetupCoarseGraph: vsize");
+  if (dovsize) {
+    cgraph->vsize = iMallocNoSignal(scnvtxs,
+        "SetupCoarseGraph: vsize", &sigrval);
+    if (cgraph->vsize == NULL)
+      goto MEMORY_ERROR;
+  }
+
+  cgraph->finer  = graph;
+  graph->coarser = cgraph;
 
   return cgraph;
+
+MEMORY_ERROR:
+  if (errno == 0)
+    errno = ENOMEM;
+  FreeGraph(&cgraph);
+  return NULL;
 }
 
 
@@ -1112,8 +1333,31 @@ graph_t *SetupCoarseGraph(graph_t *graph, idx_t cnvtxs, int dovsize)
 /*************************************************************************/
 void ReAdjustMemory(ctrl_t *ctrl, graph_t *graph, graph_t *cgraph) 
 {
+  idx_t *new_adjncy, *new_adjwgt;
+  int sigrval, saved_errno;
+
   if (cgraph->nedges > 10000 && cgraph->nedges < 0.9*graph->nedges) {
-    cgraph->adjncy = irealloc(cgraph->adjncy, cgraph->nedges, "ReAdjustMemory: adjncy");
-    cgraph->adjwgt = irealloc(cgraph->adjwgt, cgraph->nedges, "ReAdjustMemory: adjwgt");
+    new_adjncy = imalloc(cgraph->nedges,
+        "ReAdjustMemory: adjncy");
+    if (new_adjncy == NULL)
+      return;
+    icopy(cgraph->nedges, cgraph->adjncy, new_adjncy);
+
+    new_adjwgt = iReallocNoSignal(cgraph->adjwgt,
+        (size_t)cgraph->nedges, "ReAdjustMemory: adjwgt",
+        &sigrval);
+    if (new_adjwgt == NULL) {
+      saved_errno = errno != 0 ? errno : ENOMEM;
+      gk_free((void **)&new_adjncy, LTERM);
+      errno = saved_errno;
+      if (sigrval != 0)
+        gk_errexit(sigrval,
+            "ReAdjustMemory: failed to resize adjacency arrays");
+      return;
+    }
+
+    gk_free((void **)&cgraph->adjncy, LTERM);
+    cgraph->adjncy = new_adjncy;
+    cgraph->adjwgt = new_adjwgt;
   }
 }

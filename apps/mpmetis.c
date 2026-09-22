@@ -22,31 +22,42 @@
 int main(int argc, char *argv[])
 {
   idx_t options[METIS_NOPTIONS];
-  mesh_t *mesh;
-  idx_t *epart, *npart;
+  mesh_t *mesh=NULL;
+  idx_t *epart=NULL, *npart=NULL;
   idx_t objval;
   params_t *params;
-  int status=0;
+  int malloc_initialized=0, status=METIS_OK;
 
   params = parse_cmdline(argc, argv);
 
   gk_startcputimer(params->iotimer);
-  mesh = ReadMesh(params);
+  status = ReadMesh(params, &mesh);
+  if (status != METIS_OK)
+    goto cleanup;
 
   if (mesh->ncon > 1) {
     printf("*** Meshes with more than one balancing constraint are not supported yet.\n");
-    exit(0);
+    status = METIS_ERROR_INPUT;
+    goto cleanup;
   }
 
-  ReadTPwgts(params, mesh->ncon);
+  status = ReadTPwgts(params, mesh->ncon);
+  if (status != METIS_OK)
+    goto cleanup;
   gk_stopcputimer(params->iotimer);
 
   MPPrintInfo(params, mesh);
 
   epart = imalloc(mesh->ne, "main: epart");
   npart = imalloc(mesh->nn, "main: npart");
+  if (epart == NULL || npart == NULL) {
+    status = METIS_ERROR_MEMORY;
+    goto cleanup;
+  }
 
-  METIS_SetDefaultOptions(options);
+  status = METIS_SetDefaultOptions(options);
+  if (status != METIS_OK)
+    goto cleanup;
   options[METIS_OPTION_PTYPE]   = params->ptype;
   options[METIS_OPTION_OBJTYPE] = params->objtype;
   options[METIS_OPTION_CTYPE]   = params->ctype;
@@ -63,7 +74,11 @@ int main(int argc, char *argv[])
   options[METIS_OPTION_NCUTS]   = params->ncuts;
 
 
-  gk_malloc_init();
+  if (!gk_malloc_init()) {
+    status = METIS_ERROR_MEMORY;
+    goto cleanup;
+  }
+  malloc_initialized = 1;
   gk_startcputimer(params->parttimer);
 
   switch (params->gtype) {
@@ -85,6 +100,7 @@ int main(int argc, char *argv[])
         printf("***It seems that Metis did not free all of its memory! Report this.\n");
   params->maxmemory = gk_GetMaxMemoryUsed();
   gk_malloc_cleanup(0);
+  malloc_initialized = 0;
 
   if (status != METIS_OK) {
     printf("\n***Metis returned with an error.\n");
@@ -93,18 +109,24 @@ int main(int argc, char *argv[])
     if (!params->nooutput) {
       /* Write the solution */
       gk_startcputimer(params->iotimer);
-      WriteMeshPartition(params->filename, params->nparts, mesh->ne, epart, mesh->nn, npart);
+      status = WriteMeshPartition(params->filename, params->nparts, mesh->ne,
+          epart, mesh->nn, npart);
       gk_stopcputimer(params->iotimer);
     }
 
-    MPReportResults(params, mesh, epart, npart, objval);
+    if (status == METIS_OK)
+      MPReportResults(params, mesh, epart, npart, objval);
   }
 
+cleanup:
+  if (malloc_initialized)
+    gk_malloc_cleanup(0);
   FreeMesh(&mesh);
   gk_free((void **)&epart, &npart, LTERM);
   gk_free((void **)&params->filename, &params->tpwgtsfile, &params->tpwgts, 
       &params->ubvecstr, &params->ubvec, &params, LTERM);
 
+  return status == METIS_OK ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 

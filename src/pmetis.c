@@ -11,6 +11,7 @@
 
 
 #include "metislib.h"
+#include "input_validation.h"
 
 
 /*************************************************************************/
@@ -93,25 +94,40 @@ int METIS_PartGraphRecursive(idx_t *nvtxs, idx_t *ncon, idx_t *xadj,
           idx_t *nparts, real_t *tpwgts, real_t *ubvec, idx_t *options, 
           idx_t *objval, idx_t *part)
 {
-  int sigrval=0, renumber=0;
+  volatile int rstatus=METIS_OK, sigrval=0, renumber=0;
+  idx_t numflag, objtype;
   graph_t *graph;
-  ctrl_t *ctrl;
+  ctrl_t * volatile ctrl=NULL;
+
+  /* validate all caller-owned dimensions before indexing their arrays */
+  if (nvtxs == NULL || ncon == NULL || nparts == NULL ||
+      objval == NULL || part == NULL)
+    return METIS_ERROR_INPUT;
+  numflag = GETOPTION(options, METIS_OPTION_NUMBERING, 0);
+  objtype = GETOPTION(options, METIS_OPTION_OBJTYPE, METIS_OBJTYPE_CUT);
+  rstatus = ValidateGraphInput(*nvtxs, *ncon, xadj, adjncy, vwgt, vsize,
+      adjwgt, numflag, objtype);
+  if (rstatus != METIS_OK)
+    return rstatus;
 
   /* set up malloc cleaning code and signal catchers */
   if (!gk_malloc_init()) 
     return METIS_ERROR_MEMORY;
 
-  gk_sigtrap();
+  if (!gk_sigtrap()) {
+    gk_malloc_cleanup(0);
+    return METIS_ERROR_MEMORY;
+  }
 
-  if ((sigrval = gk_sigcatch()) != 0) 
+  METIS_SIGCATCH(sigrval);
+  if (sigrval != 0)
     goto SIGTHROW;
 
   /* set up the run parameters */
-  ctrl = SetupCtrl(METIS_OP_PMETIS, options, *ncon, *nparts, tpwgts, ubvec);
-  if (!ctrl) {
-    gk_siguntrap();
-    return METIS_ERROR_INPUT;
-  }
+  rstatus = SetupCtrl(METIS_OP_PMETIS, options, *ncon, *nparts, tpwgts,
+      ubvec, (ctrl_t **)&ctrl);
+  if (rstatus != METIS_OK)
+    goto SIGTHROW;
 
   /* if required, change the numbering to 0 */
   if (ctrl->numflag == 1) {
@@ -120,10 +136,15 @@ int METIS_PartGraphRecursive(idx_t *nvtxs, idx_t *ncon, idx_t *xadj,
   }
 
   /* set up the graph */
-  graph = SetupGraph(ctrl, *nvtxs, *ncon, xadj, adjncy, vwgt, vsize, adjwgt);
+  rstatus = SetupGraph((ctrl_t *)ctrl, *nvtxs, *ncon, xadj, adjncy, vwgt,
+      vsize, adjwgt, &graph);
+  if (rstatus != METIS_OK)
+    goto SIGTHROW;
 
   /* allocate workspace memory */
-  AllocateWorkSpace(ctrl, graph);
+  rstatus = AllocateWorkSpace((ctrl_t *)ctrl, graph);
+  if (rstatus != METIS_OK)
+    goto SIGTHROW;
 
   /* start the partitioning */
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, InitTimers(ctrl));
@@ -131,22 +152,33 @@ int METIS_PartGraphRecursive(idx_t *nvtxs, idx_t *ncon, idx_t *xadj,
 
   iset(*nvtxs, 0, part);
   *objval = (*nparts == 1 ? 0 : MlevelRecursiveBisection(ctrl, graph, *nparts, part, ctrl->tpwgts, 0));
+  if (ctrl->status != METIS_OK) {
+    rstatus = ctrl->status;
+    goto SIGTHROW;
+  }
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->TotalTmr));
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, PrintTimers(ctrl));
 
   /* clean up */
-  FreeCtrl(&ctrl);
+  FreeCtrl((ctrl_t **)&ctrl);
 
 SIGTHROW:
+  if (ctrl != NULL)
+    graph_CleanupDiskFiles((ctrl_t *)ctrl);
+
   /* if required, change the numbering back to 1 */
-  if (renumber)
-    Change2FNumbering(*nvtxs, xadj, adjncy, part);
+  if (renumber) {
+    if (sigrval == 0 && rstatus == METIS_OK)
+      Change2FNumbering(*nvtxs, xadj, adjncy, part);
+    else
+      Change2FNumbering2(*nvtxs, xadj, adjncy);
+  }
 
   gk_siguntrap();
   gk_malloc_cleanup(0);
 
-  return metis_rcode(sigrval);
+  return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }
 
 
@@ -170,8 +202,13 @@ idx_t MlevelRecursiveBisection(ctrl_t *ctrl, graph_t *graph, idx_t nparts,
 
   /* determine the weights of the two partitions as a function of the weight of the
      target partition weights */
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return 0;
   tpwgts2 = rwspacemalloc(ctrl, 2*ncon);
+  if (tpwgts2 == NULL) {
+    WCOREPOP;
+    return 0;
+  }
   for (i=0; i<ncon; i++) {
     tpwgts2[i]      = rsum((nparts>>1), tpwgts+i, ncon);
     tpwgts2[ncon+i] = 1.0 - tpwgts2[i];
@@ -181,14 +218,25 @@ idx_t MlevelRecursiveBisection(ctrl_t *ctrl, graph_t *graph, idx_t nparts,
   objval = MultilevelBisect(ctrl, graph, tpwgts2);
 
   WCOREPOP;
+  if (ctrl->status != METIS_OK) {
+    FreeGraph(&graph);
+    return objval;
+  }
 
   label = graph->label;
   where = graph->where;
   for (i=0; i<nvtxs; i++)
     part[label[i]] = where[i] + fpart;
 
-  if (nparts > 2) 
+  if (nparts > 2) {
     SplitGraphPart(ctrl, graph, &lgraph, &rgraph);
+    if (ctrl->status != METIS_OK) {
+      FreeGraph(&graph);
+      FreeGraph(&lgraph);
+      FreeGraph(&rgraph);
+      return objval;
+    }
+  }
 
   /* Free the memory of the top level graph */
   FreeGraph(&graph);
@@ -204,6 +252,10 @@ idx_t MlevelRecursiveBisection(ctrl_t *ctrl, graph_t *graph, idx_t nparts,
   if (nparts > 3) {
     objval += MlevelRecursiveBisection(ctrl, lgraph, (nparts>>1), part, 
                tpwgts, fpart);
+    if (ctrl->status != METIS_OK) {
+      FreeGraph(&rgraph);
+      return objval;
+    }
     objval += MlevelRecursiveBisection(ctrl, rgraph, nparts-(nparts>>1), part, 
                tpwgts+(nparts>>1)*ncon, fpart+(nparts>>1));
   }
@@ -229,18 +281,27 @@ idx_t MultilevelBisect(ctrl_t *ctrl, graph_t *graph, real_t *tpwgts)
 
   Setup2WayBalMultipliers(ctrl, graph, tpwgts);
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return 0;
 
   if (ctrl->ncuts > 1)
     bestwhere = iwspacemalloc(ctrl, graph->nvtxs);
+  if (ctrl->ncuts > 1 && bestwhere == NULL)
+    goto ERROR;
 
   for (i=0; i<ctrl->ncuts; i++) {
     cgraph = CoarsenGraph(ctrl, graph);
+    if (cgraph == NULL)
+      goto ERROR;
 
     niparts = (cgraph->nvtxs <= ctrl->CoarsenTo ? SMALLNIPARTS : LARGENIPARTS);
     Init2WayPartition(ctrl, cgraph, tpwgts, niparts);
+    if (ctrl->status != METIS_OK)
+      goto ERROR;
 
     Refine2Way(ctrl, graph, cgraph, tpwgts);
+    if (ctrl->status != METIS_OK)
+      goto ERROR;
 
     curobj = graph->mincut;
     curbal = ComputeLoadImbalanceDiff(graph, 2, ctrl->pijbm, ctrl->ubfactors);
@@ -269,6 +330,11 @@ idx_t MultilevelBisect(ctrl_t *ctrl, graph_t *graph, real_t *tpwgts)
   WCOREPOP;
 
   return bestobj;
+
+ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  WCOREPOP;
+  return 0;
 }
 
 
@@ -283,9 +349,11 @@ void SplitGraphPart(ctrl_t *ctrl, graph_t *graph, graph_t **r_lgraph,
   idx_t *sxadj[2], *svwgt[2], *sadjncy[2], *sadjwgt[2], *slabel[2];
   idx_t *rename;
   idx_t *auxadjncy, *auxadjwgt;
-  graph_t *lgraph, *rgraph;
+  graph_t *lgraph=NULL, *rgraph=NULL;
 
-  WCOREPUSH;
+  *r_lgraph = *r_rgraph = NULL;
+  if (!WCOREPUSH)
+    return;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->SplitTmr));
 
@@ -302,6 +370,8 @@ void SplitGraphPart(ctrl_t *ctrl, graph_t *graph, graph_t **r_lgraph,
   ASSERT(bndptr != NULL);
 
   rename = iwspacemalloc(ctrl, nvtxs);
+  if (rename == NULL)
+    goto MEMORY_ERROR;
   
   snvtxs[0] = snvtxs[1] = snedges[0] = snedges[1] = 0;
   for (i=0; i<nvtxs; i++) {
@@ -310,14 +380,16 @@ void SplitGraphPart(ctrl_t *ctrl, graph_t *graph, graph_t **r_lgraph,
     snedges[k] += xadj[i+1]-xadj[i];
   }
 
-  lgraph      = SetupSplitGraph(graph, snvtxs[0], snedges[0]);
+  if (SetupSplitGraph(graph, snvtxs[0], snedges[0], &lgraph) != METIS_OK)
+    goto MEMORY_ERROR;
   sxadj[0]    = lgraph->xadj;
   svwgt[0]    = lgraph->vwgt;
   sadjncy[0]  = lgraph->adjncy; 	
   sadjwgt[0]  = lgraph->adjwgt; 
   slabel[0]   = lgraph->label;
 
-  rgraph      = SetupSplitGraph(graph, snvtxs[1], snedges[1]);
+  if (SetupSplitGraph(graph, snvtxs[1], snedges[1], &rgraph) != METIS_OK)
+    goto MEMORY_ERROR;
   sxadj[1]    = rgraph->xadj;
   svwgt[1]    = rgraph->vwgt;
   sadjncy[1]  = rgraph->adjncy; 	
@@ -367,8 +439,9 @@ void SplitGraphPart(ctrl_t *ctrl, graph_t *graph, graph_t **r_lgraph,
   lgraph->nedges = snedges[0];
   rgraph->nedges = snedges[1];
 
-  SetupGraph_tvwgt(lgraph);
-  SetupGraph_tvwgt(rgraph);
+  if (SetupGraph_tvwgt(lgraph) != METIS_OK ||
+      SetupGraph_tvwgt(rgraph) != METIS_OK)
+    goto MEMORY_ERROR;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->SplitTmr));
 
@@ -376,5 +449,11 @@ void SplitGraphPart(ctrl_t *ctrl, graph_t *graph, graph_t **r_lgraph,
   *r_rgraph = rgraph;
 
   WCOREPOP;
-}
+  return;
 
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  FreeGraph(&lgraph);
+  FreeGraph(&rgraph);
+  WCOREPOP;
+}

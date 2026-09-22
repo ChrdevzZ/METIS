@@ -21,28 +21,39 @@
 /*************************************************************************/
 int main(int argc, char *argv[])
 {
-  mesh_t *mesh;
-  graph_t *graph;
+  mesh_t *mesh=NULL;
+  graph_t *graph=NULL;
   params_t *params;
-  int status=0;
+  int malloc_initialized=0, status=METIS_OK;
 
   params = parse_cmdline(argc, argv);
 
   gk_startcputimer(params->iotimer);
-  mesh = ReadMesh(params);
+  status = ReadMesh(params, &mesh);
+  if (status != METIS_OK)
+    goto cleanup;
 
   gk_stopcputimer(params->iotimer);
 
   if (mesh->ncon > 1) {
     printf("*** Meshes with more than one balancing constraint are not supported yet.\n");
-    exit(0);
+    status = METIS_ERROR_INPUT;
+    goto cleanup;
   }
 
   M2GPrintInfo(params, mesh);
 
   graph = CreateGraph();
+  if (graph == NULL) {
+    status = METIS_ERROR_MEMORY;
+    goto cleanup;
+  }
 
-  gk_malloc_init();
+  if (!gk_malloc_init()) {
+    status = METIS_ERROR_MEMORY;
+    goto cleanup;
+  }
+  malloc_initialized = 1;
   gk_startcputimer(params->parttimer);
 
   switch (params->gtype) {
@@ -74,6 +85,7 @@ int main(int argc, char *argv[])
         printf("***It seems that Metis did not free all of its memory! Report this.\n");
   params->maxmemory = gk_GetMaxMemoryUsed();
   gk_malloc_cleanup(0);
+  malloc_initialized = 0;
 
   if (status != METIS_OK) {
     printf("\n***Metis returned with an error.\n");
@@ -81,15 +93,20 @@ int main(int argc, char *argv[])
   else {
     /* Write the graph */
     gk_startcputimer(params->iotimer);
-    WriteGraph(graph, params->outfile);
+    status = WriteGraph(graph, params->outfile);
     gk_stopcputimer(params->iotimer);
 
-    M2GReportResults(params, mesh, graph);
+    if (status == METIS_OK)
+      M2GReportResults(params, mesh, graph);
   }
 
+cleanup:
+  if (malloc_initialized)
+    gk_malloc_cleanup(0);
   FreeGraph(&graph);
   FreeMesh(&mesh);
   gk_free((void **)&params->filename, &params->outfile, &params, LTERM);
+  return status == METIS_OK ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 

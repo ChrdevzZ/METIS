@@ -15,26 +15,131 @@
 #include "metisbin.h"
 
 
+#ifdef METIS_SMBFACTOR_TEST
+static int factor_allocation_count;
+static int factor_failed_allocation;
+
+
+/*************************************************************************/
+/*! Selects the allocation that the symbolic-factorization test will fail. */
+/*************************************************************************/
+void metis_smbfactor_test_fail_allocation(int allocation)
+{
+  factor_allocation_count = 0;
+  factor_failed_allocation = allocation;
+}
+#endif
+
+
+/*************************************************************************/
+/*! Allocates one factorization array without exposing an allocation signal
+    to the application driver. */
+/*************************************************************************/
+static int AllocateFactorArray(size_t count, idx_t value, const char *message,
+    idx_t **r_array)
+{
+  volatile int sigrval=0;
+
+  *r_array = NULL;
+  if (!gk_sigtrap()) {
+    errno = ENOMEM;
+    return 0;
+  }
+  METIS_SIGCATCH(sigrval);
+  if (sigrval == 0) {
+#ifdef METIS_SMBFACTOR_TEST
+    factor_allocation_count++;
+    if (factor_allocation_count == factor_failed_allocation) {
+      errno = ENOMEM;
+      gk_errexit(SIGMEM, "Injected symbolic-factorization allocation failure");
+    }
+    else
+#endif
+      *r_array = ismalloc(count, value, message);
+  }
+  gk_siguntrap();
+
+  if (sigrval != 0) {
+    if (errno == 0)
+      errno = ENOMEM;
+    return 0;
+  }
+  return *r_array != NULL;
+}
+
+
 /*************************************************************************/
 /*! This function sets up data structures for fill-in computations */
 /*************************************************************************/
-void ComputeFillIn(graph_t *graph, idx_t *perm, idx_t *iperm, 
-         size_t *r_maxlnz, size_t *r_opc)
+int ComputeFillIn(graph_t *graph, idx_t *perm, idx_t *iperm,
+         uint64_t *r_maxlnz, uint64_t *r_opc)
 {
-  idx_t i, j, k, nvtxs, maxlnz, maxsub;
+  idx_t i, nvtxs, maxlnz, maxsub;
   idx_t *xadj, *adjncy;
-  idx_t *xlnz, *xnzsub, *nzsub;
-  size_t opc;
+  idx_t *xlnz=NULL, *xnzsub=NULL, *nzsub=NULL;
+  size_t count;
+  /* Fill statistics can exceed size_t on a 32-bit host. */
+  uint64_t knz, opc=0;
+  int factor_status, renumbered=0, saved_errno=0, status=METIS_ERROR_MEMORY;
 
 /*
   printf("\nSymbolic factorization... --------------------------------------------\n");
 */
 
+  if (graph == NULL || perm == NULL || iperm == NULL ||
+      r_maxlnz == NULL || r_opc == NULL)
+    return METIS_ERROR_INPUT;
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
   adjncy = graph->adjncy;
+  if (nvtxs < 0 || xadj == NULL)
+    return METIS_ERROR_INPUT;
+  if ((uintmax_t)nvtxs+2 > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
+      (uintmax_t)nvtxs > (uintmax_t)(IDX_MAX-1)/8) {
+    errno = EOVERFLOW;
+    return METIS_ERROR_MEMORY;
+  }
+  if (xadj[nvtxs] < 0 || (xadj[nvtxs] > 0 && adjncy == NULL))
+    return METIS_ERROR_INPUT;
+  if ((uintmax_t)nvtxs+(uintmax_t)xadj[nvtxs] >
+      (uintmax_t)(IDX_MAX-1)/8) {
+    errno = EOVERFLOW;
+    return METIS_ERROR_MEMORY;
+  }
+  if (xadj[0] != 0)
+    return METIS_ERROR_INPUT;
+  for (i=0; i<nvtxs; i++) {
+    if (xadj[i] < 0 || xadj[i] > xadj[i+1])
+      return METIS_ERROR_INPUT;
+  }
+  for (i=0; i<xadj[nvtxs]; i++) {
+    if (adjncy[i] < 0 || adjncy[i] >= nvtxs)
+      return METIS_ERROR_INPUT;
+  }
+  for (i=0; i<nvtxs; i++) {
+    if (perm[i] < 0 || perm[i] >= nvtxs ||
+        iperm[i] < 0 || iperm[i] >= nvtxs)
+      return METIS_ERROR_INPUT;
+  }
+  for (i=0; i<nvtxs; i++) {
+    if (iperm[perm[i]] != i || perm[iperm[i]] != i)
+      return METIS_ERROR_INPUT;
+  }
 
   maxsub = 8*(nvtxs+xadj[nvtxs]);
+  if ((uintmax_t)maxsub+1 > (uintmax_t)SIZE_MAX/sizeof(idx_t)) {
+    errno = EOVERFLOW;
+    return METIS_ERROR_MEMORY;
+  }
+
+  /* Allocate before relabeling so allocation failure leaves the graph and
+     permutation arrays unchanged. */
+  count = (size_t)nvtxs+2;
+  if (!AllocateFactorArray(count, 0, "ComputeFillIn: xlnz", &xlnz) ||
+      !AllocateFactorArray(count, 0, "ComputeFillIn: xnzsub", &xnzsub) ||
+      !AllocateFactorArray((size_t)maxsub+1, 0, "ComputeFillIn: nzsub",
+          &nzsub))
+    goto cleanup;
 
   /* Relabel the vertices so that it starts from 1 */
   for (i=0; i<xadj[nvtxs]; i++)
@@ -45,44 +150,67 @@ void ComputeFillIn(graph_t *graph, idx_t *perm, idx_t *iperm,
     iperm[i]++;
     perm[i]++;
   }
-
-  /* Allocate the required memory */
-  xlnz   = imalloc(nvtxs+2, "ComputeFillIn: xlnz");
-  xnzsub = imalloc(nvtxs+2, "ComputeFillIn: xnzsub");
-  nzsub  = imalloc(maxsub+1, "ComputeFillIn: nzsub");
+  renumbered = 1;
 
   
   /* Call sparspak's routine. */
-  if (smbfct(nvtxs, xadj, adjncy, perm, iperm, xlnz, &maxlnz, xnzsub, nzsub, &maxsub)) {
+  factor_status = smbfct(nvtxs, xadj, adjncy, perm, iperm, xlnz, &maxlnz,
+      xnzsub, nzsub, &maxsub);
+  while (factor_status > 0) {
     printf("Realocating nzsub...\n");
     gk_free((void **)&nzsub, LTERM);
 
+    if (maxsub > (IDX_MAX-1)/2 ||
+        (uintmax_t)maxsub >
+            ((uintmax_t)SIZE_MAX/sizeof(idx_t)-1)/2) {
+      errno = EOVERFLOW;
+      goto cleanup;
+    }
     maxsub *= 2;
-    nzsub  = imalloc(maxsub+1, "ComputeFillIn: nzsub");
-    if (smbfct(nvtxs, xadj, adjncy, perm, iperm, xlnz, &maxlnz, xnzsub, nzsub, &maxsub)) 
-      errexit("MAXSUB is too small!");
+    if (!AllocateFactorArray((size_t)maxsub+1, 0,
+        "ComputeFillIn: nzsub", &nzsub))
+      goto cleanup;
+    factor_status = smbfct(nvtxs, xadj, adjncy, perm, iperm, xlnz,
+        &maxlnz, xnzsub, nzsub, &maxsub);
   }
+  if (factor_status < 0)
+    goto cleanup;
 
   for (i=0; i<nvtxs; i++)
-    xlnz[i]--;
-  for (opc=0, i=0; i<nvtxs; i++)
-    opc += (xlnz[i+1]-xlnz[i])*(xlnz[i+1]-xlnz[i]) - (xlnz[i+1]-xlnz[i]);
+    xlnz[i+1]--;
+  for (i=0; i<nvtxs; i++) {
+    knz = (uint64_t)(xlnz[i+2]-xlnz[i+1]);
+    if (knz > 0 && knz-1 > (UINT64_MAX-opc)/knz) {
+      errno = EOVERFLOW;
+      goto cleanup;
+    }
+    opc += knz*(knz-1);
+  }
 
-  *r_maxlnz = maxlnz;
+  *r_maxlnz = (uint64_t)maxlnz;
   *r_opc    = opc;
+  status = METIS_OK;
 
+cleanup:
+  if (status != METIS_OK)
+    saved_errno = errno != 0 ? errno : ENOMEM;
   gk_free((void **)&xlnz, &xnzsub, &nzsub, LTERM);
 
   /* Relabel the vertices so that it starts from 0 */
-  for (i=0; i<nvtxs; i++) {
-    iperm[i]--;
-    perm[i]--;
+  if (renumbered) {
+    for (i=0; i<nvtxs; i++) {
+      iperm[i]--;
+      perm[i]--;
+    }
+    for (i=0; i<nvtxs+1; i++)
+      xadj[i]--;
+    for (i=0; i<xadj[nvtxs]; i++)
+      adjncy[i]--;
   }
-  for (i=0; i<nvtxs+1; i++)
-    xadj[i]--;
-  for (i=0; i<xadj[nvtxs]; i++)
-    adjncy[i]--;
+  if (status != METIS_OK)
+    errno = saved_errno;
 
+  return status;
 }
 
 
@@ -115,23 +243,31 @@ idx_t smbfct(idx_t neqns, idx_t *xadj, idx_t *adjncy, idx_t *perm, idx_t *invp,
   /* Local variables */
   idx_t node, rchm, mrgk, lmax, i, j, k, m, nabor, nzbeg, nzend;
   idx_t kxsub, jstop, jstrt, mrkflg, inz, knz, flag;
-  idx_t *mrglnk, *marker, *rchlnk;
+  idx_t *mrglnk=NULL, *marker=NULL, *rchlnk=NULL;
+  int saved_errno=0;
 
-  rchlnk = ismalloc(neqns+1, 0, "smbfct: rchlnk");
-  marker = ismalloc(neqns+1, 0, "smbfct: marker");
-  mrglnk = ismalloc(neqns+1, 0, "smbfct: mgrlnk");
-
-  /* Parameter adjustments */
-  --marker;
-  --mrglnk;
-  --rchlnk;
-  --nzsub;
-  --xnzsub;
-  --xlnz;
-  --invp;
-  --perm;
-  --adjncy;
-  --xadj;
+  if (neqns == 0) {
+    *maxlnz = 0;
+    *maxsub = 0;
+    return 0;
+  }
+  if (neqns < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (neqns == IDX_MAX || (uintmax_t)neqns+1 >
+      (uintmax_t)SIZE_MAX/sizeof(idx_t)) {
+    errno = EOVERFLOW;
+    return -1;
+  }
+  if (!AllocateFactorArray((size_t)neqns+1, 0, "smbfct: rchlnk", &rchlnk) ||
+      !AllocateFactorArray((size_t)neqns+1, 0, "smbfct: marker", &marker) ||
+      !AllocateFactorArray((size_t)neqns+1, 0, "smbfct: mgrlnk", &mrglnk)) {
+    saved_errno = errno != 0 ? errno : ENOMEM;
+    gk_free((void **)&rchlnk, &marker, &mrglnk, LTERM);
+    errno = saved_errno;
+    return -1;
+  }
 
   /* Function Body */
   flag    = 0;
@@ -142,7 +278,7 @@ idx_t smbfct(idx_t neqns, idx_t *xadj, idx_t *adjncy, idx_t *perm, idx_t *invp,
   /* FOR EACH COLUMN KNZ COUNTS THE NUMBER OF NONZEROS IN COLUMN K ACCUMULATED IN RCHLNK. */
   for (k=1; k<=neqns; k++) {
     xnzsub[k] = nzend;
-    node      = perm[k];
+    node      = perm[k-1];
     knz       = 0;
     mrgk      = mrglnk[k];
     mrkflg    = 0;
@@ -152,7 +288,7 @@ idx_t smbfct(idx_t neqns, idx_t *xadj, idx_t *adjncy, idx_t *perm, idx_t *invp,
       marker[k] = marker[mrgk];
     }
 
-    if (xadj[node] >= xadj[node+1]) {
+    if (xadj[node-1] >= xadj[node]) {
       xlnz[k+1] = xlnz[k];
       continue;
     }
@@ -160,8 +296,8 @@ idx_t smbfct(idx_t neqns, idx_t *xadj, idx_t *adjncy, idx_t *perm, idx_t *invp,
     /* USE RCHLNK TO LINK THROUGH THE STRUCTURE OF A(*,K) BELOW DIAGONAL */
     assert(k <= neqns && k > 0);
     rchlnk[k] = neqns+1;
-    for (j=xadj[node]; j<xadj[node+1]; j++) {
-      nabor = invp[adjncy[j]];
+    for (j=xadj[node-1]; j<xadj[node]; j++) {
+      nabor = invp[adjncy[j-1]-1];
       if (nabor <= k) 
         continue;
       rchm = k;
@@ -189,7 +325,7 @@ idx_t smbfct(idx_t neqns, idx_t *xadj, idx_t *adjncy, idx_t *perm, idx_t *invp,
     if (mrkflg != 0 || mrgk == 0 || mrglnk[mrgk] != 0) 
       goto L350;
     xnzsub[k] = xnzsub[mrgk] + 1;
-    knz = xlnz[mrgk + 1] - (xlnz[mrgk] + 1);
+    knz = xlnz[mrgk + 1] - xlnz[mrgk] - 1;
     goto L1400;
 
 
@@ -199,7 +335,7 @@ L350:
     assert(i > 0 && i <= neqns);
     while ((i = mrglnk[i]) != 0) {
       assert(i > 0 && i <= neqns);
-      inz   = xlnz[i+1] - (xlnz[i]+1);
+      inz   = xlnz[i+1] - xlnz[i] - 1;
       jstrt = xnzsub[i] + 1;
       jstop = xnzsub[i] + inz;
 
@@ -268,13 +404,17 @@ L1000:
 
     /* COPY THE STRUCTURE OF L(*,K) FROM RCHLNK TO THE DATA STRUCTURE (XNZSUB, NZSUB) */
 L1200:
-    nzbeg = nzend + 1;
-    nzend += knz;
-
-    if (nzend >= *maxsub) {
+    if (knz < 0 || nzend < 0) {
+      errno = EOVERFLOW;
+      flag = -1;
+      break;
+    }
+    if (nzend >= *maxsub || knz >= *maxsub-nzend) {
       flag = 1; /* Out of memory */
       break;
     }
+    nzbeg = nzend + 1;
+    nzend += knz;
 
     i = k;
     for (j=nzbeg; j<=nzend; j++) {
@@ -303,6 +443,11 @@ L1400:
       mrglnk[i] = k;
     }
 
+    if (knz > IDX_MAX-xlnz[k]) {
+      errno = EOVERFLOW;
+      flag = -1;
+      break;
+    }
     xlnz[k + 1] = xlnz[k] + knz;
   }
 
@@ -312,21 +457,12 @@ L1400:
     xnzsub[neqns + 1] = xnzsub[neqns];
   }
 
-
-  marker++;
-  mrglnk++;
-  rchlnk++;
-  nzsub++;
-  xnzsub++;
-  xlnz++;
-  invp++;
-  perm++;
-  adjncy++;
-  xadj++;
-
+  if (flag < 0)
+    saved_errno = errno != 0 ? errno : EOVERFLOW;
   gk_free((void **)&rchlnk, &mrglnk, &marker, LTERM);
+  if (flag < 0)
+    errno = saved_errno;
 
   return flag;
   
 } 
-

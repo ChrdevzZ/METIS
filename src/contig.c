@@ -34,8 +34,9 @@ idx_t FindPartitionInducedComponents(graph_t *graph, idx_t *where,
 {
   idx_t i, ii, j, jj, k, me=0, nvtxs, first, last, nleft, ncmps;
   idx_t *xadj, *adjncy;
-  idx_t *touched, *perm, *todo;
+  idx_t *touched=NULL, *perm=NULL, *todo=NULL;
   idx_t mustfree_ccsr=0, mustfree_where=0;
+  int sigrval;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -43,21 +44,37 @@ idx_t FindPartitionInducedComponents(graph_t *graph, idx_t *where,
 
   /* Deal with NULL supplied cptr/cind vectors */
   if (cptr == NULL) {
-    cptr = imalloc(nvtxs+1, "FindPartitionInducedComponents: cptr");
-    cind = imalloc(nvtxs, "FindPartitionInducedComponents: cind");
+    cptr = iMallocNoSignal((size_t)nvtxs+1,
+        "FindPartitionInducedComponents: cptr", &sigrval);
+    cind = iMallocNoSignal((size_t)nvtxs,
+        "FindPartitionInducedComponents: cind", &sigrval);
     mustfree_ccsr = 1;
+    if (cptr == NULL || cind == NULL)
+      goto MEMORY_ERROR;
   }
 
   /* Deal with NULL supplied where vector */
   if (where == NULL) {
-    where = ismalloc(nvtxs, 0, "FindPartitionInducedComponents: where");
+    where = iMallocNoSignal((size_t)nvtxs,
+        "FindPartitionInducedComponents: where", &sigrval);
     mustfree_where = 1;
+    if (where == NULL)
+      goto MEMORY_ERROR;
+    iset(nvtxs, 0, where);
   }
 
   /* Allocate memory required for the BFS traversal */
-  perm    = iincset(nvtxs, 0, imalloc(nvtxs, "FindPartitionInducedComponents: perm"));
-  todo    = iincset(nvtxs, 0, imalloc(nvtxs, "FindPartitionInducedComponents: todo"));
-  touched = ismalloc(nvtxs, 0, "FindPartitionInducedComponents: touched");
+  perm = iMallocNoSignal((size_t)nvtxs,
+      "FindPartitionInducedComponents: perm", &sigrval);
+  todo = iMallocNoSignal((size_t)nvtxs,
+      "FindPartitionInducedComponents: todo", &sigrval);
+  touched = iMallocNoSignal((size_t)nvtxs,
+      "FindPartitionInducedComponents: touched", &sigrval);
+  if (perm == NULL || todo == NULL || touched == NULL)
+    goto MEMORY_ERROR;
+  iincset(nvtxs, 0, perm);
+  iincset(nvtxs, 0, todo);
+  iset(nvtxs, 0, touched);
 
 
   /* Find the connected componends induced by the partition */
@@ -97,6 +114,16 @@ idx_t FindPartitionInducedComponents(graph_t *graph, idx_t *where,
   gk_free((void **)&perm, &todo, &touched, LTERM);
 
   return ncmps;
+
+MEMORY_ERROR:
+  if (mustfree_ccsr)
+    gk_free((void **)&cptr, &cind, LTERM);
+  if (mustfree_where)
+    gk_free((void **)&where, LTERM);
+  gk_free((void **)&perm, &todo, &touched, LTERM);
+  if (errno == 0)
+    errno = ENOMEM;
+  return -1;
 }
 
 
@@ -117,14 +144,21 @@ void ComputeBFSOrdering(ctrl_t *ctrl, graph_t *graph, idx_t *bfsperm)
   idx_t i, j, k, nvtxs, first, last;
   idx_t *xadj, *adjncy, *perm;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
   adjncy = graph->adjncy;
 
   /* Allocate memory required for the BFS traversal */
-  perm = iincset(nvtxs, 0, iwspacemalloc(ctrl, nvtxs));
+  perm = iwspacemalloc(ctrl, nvtxs);
+  if (perm == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
+  iincset(nvtxs, 0, perm);
 
   iincset(nvtxs, 0, bfsperm);  /* this array will also store the vertices
                                   still to be processed */
@@ -161,7 +195,9 @@ void ComputeBFSOrdering(ctrl_t *ctrl, graph_t *graph, idx_t *bfsperm)
 
 
 /*************************************************************************/
-/*! This function checks whether a graph is contiguous or not. 
+/*! This function checks whether a graph is contiguous or not.
+
+    \returns -1 if component workspace cannot be allocated.
  */
 /**************************************************************************/
 idx_t IsConnected(graph_t *graph, idx_t report)
@@ -169,6 +205,9 @@ idx_t IsConnected(graph_t *graph, idx_t report)
   idx_t ncmps;
 
   ncmps = FindPartitionInducedComponents(graph, NULL, NULL, NULL);
+
+  if (ncmps < 0)
+    return -1;
 
   if (ncmps != 1 && report)
     printf("The graph is not connected. It has %"PRIDX" connected components.\n", ncmps);
@@ -178,29 +217,43 @@ idx_t IsConnected(graph_t *graph, idx_t report)
 
 
 /*************************************************************************/
-/*! This function checks whether or not partition pid is contiguous
-  */
+/*! This function checks whether or not partition pid is contiguous.
+
+    \returns 0 for an empty partition and -1 on allocation failure.
+ */
 /*************************************************************************/
 idx_t IsConnectedSubdomain(ctrl_t *ctrl, graph_t *graph, idx_t pid, idx_t report)
 {
   idx_t i, j, k, nvtxs, first, last, nleft, ncmps, wgt;
   idx_t *xadj, *adjncy, *where, *touched, *queue;
   idx_t *cptr;
+  int sigrval;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
   adjncy = graph->adjncy;
   where  = graph->where;
 
-  touched = ismalloc(nvtxs, 0, "IsConnected: touched");
-  queue   = imalloc(nvtxs, "IsConnected: queue");
-  cptr    = imalloc(nvtxs+1, "IsConnected: cptr");
-
   nleft = 0;
   for (i=0; i<nvtxs; i++) {
     if (where[i] == pid) 
       nleft++;
   }
+  if (nleft == 0)
+    return 0;
+
+  touched = iMallocNoSignal((size_t)nvtxs,
+      "IsConnected: touched", &sigrval);
+  queue = iMallocNoSignal((size_t)nvtxs,
+      "IsConnected: queue", &sigrval);
+  cptr = iMallocNoSignal((size_t)nvtxs+1,
+      "IsConnected: cptr", &sigrval);
+  if (touched == NULL || queue == NULL || cptr == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    gk_free((void **)&touched, &queue, &cptr, LTERM);
+    return -1;
+  }
+  iset(nvtxs, 0, touched);
 
   for (i=0; i<nvtxs; i++) {
     if (where[i] == pid) 
@@ -262,31 +315,45 @@ idx_t IsConnectedSubdomain(ctrl_t *ctrl, graph_t *graph, idx_t pid, idx_t report
     separator (i.e., graph->where[i] == 2).
     The connected component memberships are returned in the CSR-style 
     pair of arrays cptr, cind.
+
+    \returns 0 if every vertex belongs to the separator and -1 on
+             allocation failure.
 */
 /**************************************************************************/
 idx_t FindSepInducedComponents(ctrl_t *ctrl, graph_t *graph, idx_t *cptr, 
           idx_t *cind)
 {
-  idx_t i, j, k, nvtxs, first, last, nleft, ncmps, wgt;
+  idx_t i, j, k, nvtxs, first, last, nleft, ncmps;
   idx_t *xadj, *adjncy, *where, *touched, *queue;
+  int sigrval;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
   adjncy = graph->adjncy;
   where  = graph->where;
 
-  touched = ismalloc(nvtxs, 0, "IsConnected: queue");
-
-  for (i=0; i<graph->nbnd; i++)
-    touched[graph->bndind[i]] = 1;
-
-  queue = cind;
-
   nleft = 0;
   for (i=0; i<nvtxs; i++) {
     if (where[i] != 2) 
       nleft++;
   }
+  if (nleft == 0) {
+    cptr[0] = 0;
+    return 0;
+  }
+
+  touched = iMallocNoSignal((size_t)nvtxs,
+      "IsConnected: queue", &sigrval);
+  if (touched == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    return -1;
+  }
+  iset(nvtxs, 0, touched);
+
+  for (i=0; i<graph->nbnd; i++)
+    touched[graph->bndind[i]] = 1;
+
+  queue = cind;
 
   for (i=0; i<nvtxs; i++) {
     if (where[i] != 2)
@@ -345,7 +412,8 @@ void EliminateComponents(ctrl_t *ctrl, graph_t *graph)
   real_t *tpwgts;
   idx_t *vmarker=NULL, *pmarker=NULL, *modind=NULL;  /* volume specific work arrays */
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   ncon   = graph->ncon;
@@ -362,8 +430,12 @@ void EliminateComponents(ctrl_t *ctrl, graph_t *graph)
 
   cptr = iwspacemalloc(ctrl, nvtxs+1);
   cind = iwspacemalloc(ctrl, nvtxs);
+  if (cptr == NULL || cind == NULL)
+    goto ERROR;
 
   ncmps = FindPartitionInducedComponents(graph, where, cptr, cind);
+  if (ncmps < 0)
+    goto ERROR;
 
   IFSET(ctrl->dbglvl, METIS_DBG_CONTIGINFO, 
       printf("I found %"PRIDX" components, for this %"PRIDX"-way partition\n", 
@@ -374,17 +446,27 @@ void EliminateComponents(ctrl_t *ctrl, graph_t *graph)
     cwgt     = iwspacemalloc(ctrl, ncon);
     bestcwgt = iwspacemalloc(ctrl, ncon);
     cpvec    = iwspacemalloc(ctrl, nparts);
-    pcptr    = iset(nparts+1, 0, iwspacemalloc(ctrl, nparts+1));
+    pcptr    = iwspacemalloc(ctrl, nparts+1);
     pcind    = iwspacemalloc(ctrl, ncmps);
-    cwhere   = iset(nvtxs, -1, iwspacemalloc(ctrl, nvtxs));
+    cwhere   = iwspacemalloc(ctrl, nvtxs);
     todo     = iwspacemalloc(ctrl, ncmps);
     cand     = (rkv_t *)wspacemalloc(ctrl, nparts*sizeof(rkv_t));
+    if (cwgt == NULL || bestcwgt == NULL || cpvec == NULL ||
+        pcptr == NULL || pcind == NULL || cwhere == NULL || todo == NULL ||
+        cand == NULL)
+      goto ERROR;
+    iset(nparts+1, 0, pcptr);
+    iset(nvtxs, -1, cwhere);
 
     if (ctrl->objtype == METIS_OBJTYPE_VOL) {
       /* Vol-refinement specific working arrays */
       modind  = iwspacemalloc(ctrl, nvtxs);
-      vmarker = iset(nvtxs, 0, iwspacemalloc(ctrl, nvtxs));
-      pmarker = iset(nparts, -1, iwspacemalloc(ctrl, nparts));
+      vmarker = iwspacemalloc(ctrl, nvtxs);
+      pmarker = iwspacemalloc(ctrl, nparts);
+      if (modind == NULL || vmarker == NULL || pmarker == NULL)
+        goto ERROR;
+      iset(nvtxs, 0, vmarker);
+      iset(nparts, -1, pmarker);
     }
 
 
@@ -410,6 +492,8 @@ void EliminateComponents(ctrl_t *ctrl, graph_t *graph)
             bestcid  = cid;
             icopy(ncon, cwgt, bestcwgt);
           }
+          if (ctrl->status != METIS_OK)
+            goto ERROR;
         }
         /* Keep track of those that need to be dealt with */
         for (j=pcptr[i]; j<pcptr[i+1]; j++) {
@@ -501,6 +585,8 @@ void EliminateComponents(ctrl_t *ctrl, graph_t *graph)
             default:
               gk_errexit(SIGERR, "Unknown objtype %d\n", ctrl->objtype);
           }
+          if (ctrl->status != METIS_OK)
+            goto ERROR;
         }
 
         /* Update the cwhere vector */
@@ -520,6 +606,12 @@ void EliminateComponents(ctrl_t *ctrl, graph_t *graph)
 
   }
 
+  WCOREPOP;
+  return;
+
+ERROR:
+  if (ctrl->status == METIS_OK)
+    ctrl->status = METIS_ERROR_MEMORY;
   WCOREPOP;
 }
 
@@ -556,6 +648,8 @@ void MoveGroupContigForCut(ctrl_t *ctrl, graph_t *graph, idx_t to, idx_t gid,
       myrinfo->inbr = cnbrpoolGetNext(ctrl, xadj[i+1]-xadj[i]);
       myrinfo->nnbrs = 0;
     }
+    if (myrinfo->inbr == -1)
+      return;
     mynbrs = ctrl->cnbrpool + myrinfo->inbr; 
 
     /* find the location of 'to' in myrinfo or create it if it is not there */
@@ -622,6 +716,8 @@ void MoveGroupContigForVol(ctrl_t *ctrl, graph_t *graph, idx_t to, idx_t gid,
       myrinfo->inbr = vnbrpoolGetNext(ctrl, xadj[i+1]-xadj[i]);
       myrinfo->nnbrs = 0;
     }
+    if (myrinfo->inbr == -1)
+      return;
     mynbrs = ctrl->vnbrpool + myrinfo->inbr; 
 
     xgain = (myrinfo->nid == 0 && myrinfo->ned > 0 ? vsize[i] : 0);
@@ -687,6 +783,8 @@ void MoveGroupContigForVol(ctrl_t *ctrl, graph_t *graph, idx_t to, idx_t gid,
     /* Update the id/ed/gains/bnd of potentially affected nodes */
     KWayVolUpdate(ctrl, graph, i, from, to, NULL, NULL, NULL, NULL,
         NULL, BNDTYPE_REFINE, vmarker, pmarker, modind);
+    if (ctrl->status != METIS_OK)
+      return;
 
     /*CheckKWayVolPartitionParams(ctrl, graph);*/
   }
@@ -698,4 +796,3 @@ void MoveGroupContigForVol(ctrl_t *ctrl, graph_t *graph, idx_t to, idx_t gid,
       ("%"PRIDX" %"PRIDX"\n", ComputeVolume(graph, where), graph->minvol));
 
 }
-

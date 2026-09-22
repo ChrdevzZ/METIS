@@ -14,6 +14,38 @@
  */
 
 #include "metislib.h"
+#include "input_validation.h"
+
+
+/*****************************************************************************/
+/*! Converts per-row counts into CSR offsets when the total is representable.
+
+    The array is modified only for use as a newly constructed output. A
+    failure therefore leaves no caller-owned state to restore.
+*/
+/*****************************************************************************/
+static int MakeCSR(idx_t n, idx_t *ptr)
+{
+  idx_t count, i;
+  uintmax_t total=0;
+
+  for (i=0; i<n; i++) {
+    count = ptr[i];
+    if (count < 0 || (uintmax_t)count > (uintmax_t)IDX_MAX-total) {
+      errno = EOVERFLOW;
+      return 0;
+    }
+    ptr[i] = (idx_t)total;
+    total += (uintmax_t)count;
+  }
+  if (total > (uintmax_t)SIZE_MAX/sizeof(idx_t)) {
+    errno = EOVERFLOW;
+    return 0;
+  }
+  ptr[n] = (idx_t)total;
+
+  return 1;
+}
 
 
 /*****************************************************************************/
@@ -44,15 +76,43 @@
 int METIS_MeshToDual(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind, 
           idx_t *ncommon, idx_t *numflag,  idx_t **r_xadj, idx_t **r_adjncy)
 {
-  int sigrval=0, renumber=0;
+  volatile int rstatus=METIS_OK, sigrval=0, renumber=0;
+  int error, unique;
+
+  if (r_xadj == NULL || r_adjncy == NULL || r_xadj == r_adjncy)
+    return METIS_ERROR_INPUT;
+  *r_xadj = *r_adjncy = NULL;
+  if (ne == NULL || nn == NULL || ncommon == NULL || numflag == NULL)
+    return METIS_ERROR_INPUT;
+  rstatus = ValidateMeshInput(*ne, *nn, eptr, eind, *numflag);
+  if (rstatus != METIS_OK)
+    return rstatus;
+  unique = ValidateMeshElementNodes(*ne, *nn, eptr, eind, *numflag);
+  if (unique <= 0) {
+    if (unique < 0) {
+      if (errno == 0)
+        errno = ENOMEM;
+      return METIS_ERROR_MEMORY;
+    }
+    errno = EINVAL;
+    return METIS_ERROR_INPUT;
+  }
 
   /* set up malloc cleaning code and signal catchers */
-  if (!gk_malloc_init()) 
+  if (!gk_malloc_init()) {
+    if (errno == 0)
+      errno = ENOMEM;
     return METIS_ERROR_MEMORY;
+  }
 
-  gk_sigtrap();
+  if (!gk_sigtrap()) {
+    gk_malloc_cleanup(0);
+    errno = ENOMEM;
+    return METIS_ERROR_MEMORY;
+  }
 
-  if ((sigrval = gk_sigcatch()) != 0) 
+  METIS_SIGCATCH(sigrval);
+  if (sigrval != 0)
     goto SIGTHROW;
 
 
@@ -63,26 +123,35 @@ int METIS_MeshToDual(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   }
 
   /* create dual graph */
-  *r_xadj = *r_adjncy = NULL;
-  CreateGraphDual(*ne, *nn, eptr, eind, *ncommon, r_xadj, r_adjncy);
+  rstatus = CreateGraphDual(*ne, *nn, eptr, eind, *ncommon,
+      r_xadj, r_adjncy);
+  if (rstatus != METIS_OK) {
+    goto SIGTHROW;
+  }
 
 
 SIGTHROW:
+  error = errno;
+  if (error == 0 && (sigrval != 0 || rstatus != METIS_OK))
+    error = sigrval == SIGMEM || rstatus == METIS_ERROR_MEMORY ?
+        ENOMEM : EINVAL;
+
   if (renumber)
     ChangeMesh2FNumbering(*ne, eptr, eind, *ne, *r_xadj, *r_adjncy);
 
   gk_siguntrap();
   gk_malloc_cleanup(0);
 
-  if (sigrval != 0) {
+  if (sigrval != 0 || rstatus != METIS_OK) {
     if (*r_xadj != NULL)
       free(*r_xadj);
     if (*r_adjncy != NULL)
       free(*r_adjncy);
     *r_xadj = *r_adjncy = NULL;
+    errno = error;
   }
 
-  return metis_rcode(sigrval);
+  return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }
 
 
@@ -114,15 +183,43 @@ SIGTHROW:
 int METIS_MeshToNodal(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind, 
           idx_t *numflag,  idx_t **r_xadj, idx_t **r_adjncy)
 {
-  int sigrval=0, renumber=0;
+  volatile int rstatus=METIS_OK, sigrval=0, renumber=0;
+  int error, unique;
+
+  if (r_xadj == NULL || r_adjncy == NULL || r_xadj == r_adjncy)
+    return METIS_ERROR_INPUT;
+  *r_xadj = *r_adjncy = NULL;
+  if (ne == NULL || nn == NULL || numflag == NULL)
+    return METIS_ERROR_INPUT;
+  rstatus = ValidateMeshInput(*ne, *nn, eptr, eind, *numflag);
+  if (rstatus != METIS_OK)
+    return rstatus;
+  unique = ValidateMeshElementNodes(*ne, *nn, eptr, eind, *numflag);
+  if (unique <= 0) {
+    if (unique < 0) {
+      if (errno == 0)
+        errno = ENOMEM;
+      return METIS_ERROR_MEMORY;
+    }
+    errno = EINVAL;
+    return METIS_ERROR_INPUT;
+  }
 
   /* set up malloc cleaning code and signal catchers */
-  if (!gk_malloc_init()) 
+  if (!gk_malloc_init()) {
+    if (errno == 0)
+      errno = ENOMEM;
     return METIS_ERROR_MEMORY;
+  }
 
-  gk_sigtrap();
+  if (!gk_sigtrap()) {
+    gk_malloc_cleanup(0);
+    errno = ENOMEM;
+    return METIS_ERROR_MEMORY;
+  }
 
-  if ((sigrval = gk_sigcatch()) != 0) 
+  METIS_SIGCATCH(sigrval);
+  if (sigrval != 0)
     goto SIGTHROW;
 
 
@@ -133,39 +230,53 @@ int METIS_MeshToNodal(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   }
 
   /* create nodal graph */
-  *r_xadj = *r_adjncy = NULL;
-  CreateGraphNodal(*ne, *nn, eptr, eind, r_xadj, r_adjncy);
+  rstatus = CreateGraphNodal(*ne, *nn, eptr, eind, r_xadj, r_adjncy);
+  if (rstatus != METIS_OK) {
+    goto SIGTHROW;
+  }
 
 
 SIGTHROW:
+  error = errno;
+  if (error == 0 && (sigrval != 0 || rstatus != METIS_OK))
+    error = sigrval == SIGMEM || rstatus == METIS_ERROR_MEMORY ?
+        ENOMEM : EINVAL;
+
   if (renumber)
     ChangeMesh2FNumbering(*ne, eptr, eind, *nn, *r_xadj, *r_adjncy);
 
   gk_siguntrap();
   gk_malloc_cleanup(0);
 
-  if (sigrval != 0) {
+  if (sigrval != 0 || rstatus != METIS_OK) {
     if (*r_xadj != NULL)
       free(*r_xadj);
     if (*r_adjncy != NULL)
       free(*r_adjncy);
     *r_xadj = *r_adjncy = NULL;
+    errno = error;
   }
 
-  return metis_rcode(sigrval);
+  return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }
 
 
 /*****************************************************************************/
 /*! This function creates the dual of a finite element mesh */
 /*****************************************************************************/
-void CreateGraphDual(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind, idx_t ncommon, 
+int CreateGraphDual(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind, idx_t ncommon,
           idx_t **r_xadj, idx_t **r_adjncy)
 {
   idx_t i, j, nnbrs;
-  idx_t *nptr, *nind;
-  idx_t *xadj, *adjncy;
-  idx_t *marker, *nbrs;
+  idx_t *nptr=NULL, *nind=NULL;
+  idx_t *xadj=NULL, *adjncy=NULL;
+  idx_t *marker=NULL, *nbrs=NULL;
+  int error, sigrval;
+  size_t nadjncy;
+
+  if (r_xadj == NULL || r_adjncy == NULL || r_xadj == r_adjncy)
+    return METIS_ERROR_INPUT;
+  *r_xadj = *r_adjncy = NULL;
 
   if (ncommon < 1) {
     printf("  Increased ncommon to 1, as it was initially %"PRIDX"\n", ncommon);
@@ -173,8 +284,14 @@ void CreateGraphDual(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind, idx_t ncommon
   }
 
   /* construct the node-element list first */
-  nptr = ismalloc(nn+1, 0, "CreateGraphDual: nptr");
-  nind = imalloc(eptr[ne], "CreateGraphDual: nind");
+  nptr = iMallocNoSignal((size_t)nn+1, "CreateGraphDual: nptr", &sigrval);
+  if (nptr == NULL)
+    goto MEMORY_ERROR;
+  iset(nn+1, 0, nptr);
+  nind = iMallocNoSignal((size_t)eptr[ne], "CreateGraphDual: nind",
+      &sigrval);
+  if (nind == NULL)
+    goto MEMORY_ERROR;
 
   for (i=0; i<ne; i++) {
     for (j=eptr[i]; j<eptr[i+1]; j++)
@@ -192,30 +309,34 @@ void CreateGraphDual(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind, idx_t ncommon
   /* Allocate memory for xadj, since you know its size.
      These are done using standard malloc as they are returned
      to the calling function */
-  if ((xadj = (idx_t *)malloc((ne+1)*sizeof(idx_t))) == NULL) 
-    gk_errexit(SIGMEM, "***Failed to allocate memory for xadj.\n");
-  *r_xadj = xadj;
+  xadj = (idx_t *)malloc(((size_t)ne+1)*sizeof(idx_t));
+  if (xadj == NULL)
+    goto MEMORY_ERROR;
   iset(ne+1, 0, xadj);
 
   /* allocate memory for working arrays used by FindCommonElements */
-  marker = ismalloc(ne, 0, "CreateGraphDual: marker");
-  nbrs   = imalloc(ne, "CreateGraphDual: nbrs");
+  marker = iMallocNoSignal((size_t)ne, "CreateGraphDual: marker", &sigrval);
+  if (marker == NULL)
+    goto MEMORY_ERROR;
+  iset(ne, 0, marker);
+  nbrs = iMallocNoSignal((size_t)ne, "CreateGraphDual: nbrs", &sigrval);
+  if (nbrs == NULL)
+    goto MEMORY_ERROR;
 
   for (i=0; i<ne; i++) {
     xadj[i] = FindCommonElements(i, eptr[i+1]-eptr[i], eind+eptr[i], nptr, 
                   nind, eptr, ncommon, marker, nbrs);
   }
-  MAKECSR(i, ne, xadj);
+  if (!MakeCSR(ne, xadj))
+    goto MEMORY_ERROR;
 
   /* Allocate memory for adjncy, since you now know its size.
      These are done using standard malloc as they are returned
      to the calling function */
-  if ((adjncy = (idx_t *)malloc(xadj[ne]*sizeof(idx_t))) == NULL) {
-    free(xadj);
-    *r_xadj = NULL;
-    gk_errexit(SIGMEM, "***Failed to allocate memory for adjncy.\n");
-  }
-  *r_adjncy = adjncy;
+  nadjncy = xadj[ne] == 0 ? 1 : (size_t)xadj[ne];
+  adjncy = (idx_t *)malloc(nadjncy*sizeof(idx_t));
+  if (adjncy == NULL)
+    goto MEMORY_ERROR;
 
   for (i=0; i<ne; i++) {
     nnbrs = FindCommonElements(i, eptr[i+1]-eptr[i], eind+eptr[i], nptr, 
@@ -226,6 +347,18 @@ void CreateGraphDual(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind, idx_t ncommon
   SHIFTCSR(i, ne, xadj);
   
   gk_free((void **)&nptr, &nind, &marker, &nbrs, LTERM);
+
+  *r_xadj = xadj;
+  *r_adjncy = adjncy;
+  return METIS_OK;
+
+MEMORY_ERROR:
+  error = errno == 0 ? ENOMEM : errno;
+  free(xadj);
+  free(adjncy);
+  gk_free((void **)&nptr, &nind, &marker, &nbrs, LTERM);
+  errno = error;
+  return METIS_ERROR_MEMORY;
 }
 
 
@@ -274,18 +407,29 @@ idx_t FindCommonElements(idx_t qid, idx_t elen, idx_t *eind, idx_t *nptr,
 /*****************************************************************************/
 /*! This function creates the (almost) nodal of a finite element mesh */
 /*****************************************************************************/
-void CreateGraphNodal(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind, 
+int CreateGraphNodal(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind,
           idx_t **r_xadj, idx_t **r_adjncy)
 {
   idx_t i, j, nnbrs;
-  idx_t *nptr, *nind;
-  idx_t *xadj, *adjncy;
-  idx_t *marker, *nbrs;
+  idx_t *nptr=NULL, *nind=NULL;
+  idx_t *xadj=NULL, *adjncy=NULL;
+  idx_t *marker=NULL, *nbrs=NULL;
+  int error, sigrval;
+  size_t nadjncy;
 
+  if (r_xadj == NULL || r_adjncy == NULL || r_xadj == r_adjncy)
+    return METIS_ERROR_INPUT;
+  *r_xadj = *r_adjncy = NULL;
 
   /* construct the node-element list first */
-  nptr = ismalloc(nn+1, 0, "CreateGraphNodal: nptr");
-  nind = imalloc(eptr[ne], "CreateGraphNodal: nind");
+  nptr = iMallocNoSignal((size_t)nn+1, "CreateGraphNodal: nptr", &sigrval);
+  if (nptr == NULL)
+    goto MEMORY_ERROR;
+  iset(nn+1, 0, nptr);
+  nind = iMallocNoSignal((size_t)eptr[ne], "CreateGraphNodal: nind",
+      &sigrval);
+  if (nind == NULL)
+    goto MEMORY_ERROR;
 
   for (i=0; i<ne; i++) {
     for (j=eptr[i]; j<eptr[i+1]; j++)
@@ -303,30 +447,34 @@ void CreateGraphNodal(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind,
   /* Allocate memory for xadj, since you know its size.
      These are done using standard malloc as they are returned
      to the calling function */
-  if ((xadj = (idx_t *)malloc((nn+1)*sizeof(idx_t))) == NULL)
-    gk_errexit(SIGMEM, "***Failed to allocate memory for xadj.\n");
-  *r_xadj = xadj;
+  xadj = (idx_t *)malloc(((size_t)nn+1)*sizeof(idx_t));
+  if (xadj == NULL)
+    goto MEMORY_ERROR;
   iset(nn+1, 0, xadj);
 
   /* allocate memory for working arrays used by FindCommonElements */
-  marker = ismalloc(nn, 0, "CreateGraphNodal: marker");
-  nbrs   = imalloc(nn, "CreateGraphNodal: nbrs");
+  marker = iMallocNoSignal((size_t)nn, "CreateGraphNodal: marker", &sigrval);
+  if (marker == NULL)
+    goto MEMORY_ERROR;
+  iset(nn, 0, marker);
+  nbrs = iMallocNoSignal((size_t)nn, "CreateGraphNodal: nbrs", &sigrval);
+  if (nbrs == NULL)
+    goto MEMORY_ERROR;
 
   for (i=0; i<nn; i++) {
     xadj[i] = FindCommonNodes(i, nptr[i+1]-nptr[i], nind+nptr[i], eptr, 
                   eind, marker, nbrs);
   }
-  MAKECSR(i, nn, xadj);
+  if (!MakeCSR(nn, xadj))
+    goto MEMORY_ERROR;
 
   /* Allocate memory for adjncy, since you now know its size.
      These are done using standard malloc as they are returned
      to the calling function */
-  if ((adjncy = (idx_t *)malloc(xadj[nn]*sizeof(idx_t))) == NULL) {
-    free(xadj);
-    *r_xadj = NULL;
-    gk_errexit(SIGMEM, "***Failed to allocate memory for adjncy.\n");
-  }
-  *r_adjncy = adjncy;
+  nadjncy = xadj[nn] == 0 ? 1 : (size_t)xadj[nn];
+  adjncy = (idx_t *)malloc(nadjncy*sizeof(idx_t));
+  if (adjncy == NULL)
+    goto MEMORY_ERROR;
 
   for (i=0; i<nn; i++) {
     nnbrs = FindCommonNodes(i, nptr[i+1]-nptr[i], nind+nptr[i], eptr, 
@@ -337,6 +485,18 @@ void CreateGraphNodal(idx_t ne, idx_t nn, idx_t *eptr, idx_t *eind,
   SHIFTCSR(i, nn, xadj);
   
   gk_free((void **)&nptr, &nind, &marker, &nbrs, LTERM);
+
+  *r_xadj = xadj;
+  *r_adjncy = adjncy;
+  return METIS_OK;
+
+MEMORY_ERROR:
+  error = errno == 0 ? ENOMEM : errno;
+  free(xadj);
+  free(adjncy);
+  gk_free((void **)&nptr, &nind, &marker, &nbrs, LTERM);
+  errno = error;
+  return METIS_ERROR_MEMORY;
 }
 
 
@@ -382,6 +542,8 @@ mesh_t *CreateMesh(void)
   mesh_t *mesh;
 
   mesh = (mesh_t *)gk_malloc(sizeof(mesh_t), "CreateMesh: mesh");
+  if (mesh == NULL)
+    return NULL;
 
   InitMesh(mesh);
 
@@ -403,10 +565,13 @@ void InitMesh(mesh_t *mesh)
 /*************************************************************************/
 void FreeMesh(mesh_t **r_mesh) 
 {
-  mesh_t *mesh = *r_mesh;
+  mesh_t *mesh;
+
+  if (r_mesh == NULL || *r_mesh == NULL)
+    return;
+  mesh = *r_mesh;
   
   gk_free((void **)&mesh->eptr, &mesh->eind, &mesh->ewgt, &mesh, LTERM);
 
   *r_mesh = NULL;
 }
-

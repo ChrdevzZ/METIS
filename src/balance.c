@@ -10,6 +10,27 @@
 
 #include "metislib.h"
 
+
+/*************************************************************************/
+/*! Checks a difference against three times the average without overflow. */
+/*************************************************************************/
+static int IsLessThan3Average(real_t diff, idx_t total, idx_t count)
+{
+  idx_t extra, quotient, remainder, threshold;
+
+  quotient  = total/count;
+  remainder = total%count;
+  extra = (remainder >= count-count/3 ? 2 :
+      (remainder >= count/3+(count%3 != 0) ? 1 : 0));
+
+  if (quotient > IDX_MAX/3 || 3*quotient > IDX_MAX-extra)
+    return 1;
+  threshold = 3*quotient+extra;
+
+  return diff < threshold;
+}
+
+
 /*************************************************************************
 * This function is the entry poidx_t of the bisection balancing algorithms.
 **************************************************************************/
@@ -20,7 +41,9 @@ void Balance2Way(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
 
   if (graph->ncon == 1) {
     /* return right away if the balance is OK */
-    if (rabs(ntpwgts[0]*graph->tvwgt[0]-graph->pwgts[0]) < 3*graph->tvwgt[0]/graph->nvtxs)
+    if (IsLessThan3Average(
+          rabs(ntpwgts[0]*graph->tvwgt[0]-graph->pwgts[0]),
+          graph->tvwgt[0], graph->nvtxs))
       return;
 
     if (graph->nbnd > 0)
@@ -47,7 +70,8 @@ void Bnd2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
   idx_t higain, mincut, mindiff;
   idx_t tpwgts[2];
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -63,6 +87,11 @@ void Bnd2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
 
   moved = iwspacemalloc(ctrl, nvtxs);
   perm  = iwspacemalloc(ctrl, nvtxs);
+  if (moved == NULL || perm == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
   /* Determine from which domain you will be moving data */
   tpwgts[0] = graph->tvwgt[0]*ntpwgts[0];
@@ -77,6 +106,11 @@ void Bnd2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
              graph->mincut));
 
   queue = rpqCreate(nvtxs);
+  if (queue == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
   iset(nvtxs, -1, moved);
 
@@ -175,7 +209,8 @@ void General2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
   idx_t higain, mincut, mindiff;
   idx_t tpwgts[2];
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -191,6 +226,11 @@ void General2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
 
   moved = iwspacemalloc(ctrl, nvtxs);
   perm  = iwspacemalloc(ctrl, nvtxs);
+  if (moved == NULL || perm == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
   /* Determine from which domain you will be moving data */
   tpwgts[0] = graph->tvwgt[0]*ntpwgts[0];
@@ -204,6 +244,11 @@ void General2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
              pwgts[0], pwgts[1], tpwgts[0], tpwgts[1], graph->nvtxs, graph->nbnd, graph->mincut));
 
   queue = rpqCreate(nvtxs);
+  if (queue == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
   iset(nvtxs, -1, moved);
 
@@ -288,7 +333,8 @@ void McGeneral2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
   real_t *invtvwgt, *minbalv, *newbalv, minbal, newbal;
   rpq_t **queues;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs    = graph->nvtxs;
   ncon     = graph->ncon;
@@ -311,13 +357,31 @@ void McGeneral2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
   newbalv = rwspacemalloc(ctrl, ncon);
   minbalv = rwspacemalloc(ctrl, ncon);
   qsizes  = iwspacemalloc(ctrl, 2*ncon);
+  if (moved == NULL || swaps == NULL || perm == NULL || qnum == NULL ||
+      newbalv == NULL || minbalv == NULL || qsizes == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
 
   limit = gk_min(gk_max(0.01*nvtxs, 15), 100);
 
   /* Initialize the queues */
   queues = (rpq_t **)wspacemalloc(ctrl, 2*ncon*sizeof(rpq_t *));
+  if (queues == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
   for (i=0; i<2*ncon; i++) {
     queues[i] = rpqCreate(nvtxs);
+    if (queues[i] == NULL) {
+      ctrl->status = METIS_ERROR_MEMORY;
+      while (i>0)
+        rpqDestroy(queues[--i]);
+      WCOREPOP;
+      return;
+    }
     qsizes[i] = 0;
   }
 

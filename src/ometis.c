@@ -14,6 +14,7 @@
  */
 
 #include "metislib.h"
+#include "input_validation.h"
 
 
 /*************************************************************************/
@@ -43,29 +44,43 @@
 int METIS_NodeND(idx_t *nvtxs, idx_t *xadj, idx_t *adjncy, idx_t *vwgt,
           idx_t *options, idx_t *perm, idx_t *iperm) 
 {
-  int sigrval=0, renumber=0;
+  volatile int rstatus=METIS_OK, sigrval=0, renumber=0;
   idx_t i, ii, j, l, nnvtxs=0;
   graph_t *graph=NULL;
-  ctrl_t *ctrl;
+  ctrl_t * volatile ctrl=NULL;
   idx_t *cptr, *cind, *piperm;
   int numflag = 0;
+  idx_t objtype;
+
+  /* validate all caller-owned dimensions before indexing their arrays */
+  if (nvtxs == NULL || perm == NULL || iperm == NULL)
+    return METIS_ERROR_INPUT;
+  numflag = GETOPTION(options, METIS_OPTION_NUMBERING, 0);
+  objtype = GETOPTION(options, METIS_OPTION_OBJTYPE, METIS_OBJTYPE_NODE);
+  rstatus = ValidateGraphInput(*nvtxs, 1, xadj, adjncy, vwgt, NULL, NULL,
+      numflag, objtype);
+  if (rstatus != METIS_OK)
+    return rstatus;
 
   /* set up malloc cleaning code and signal catchers */
   if (!gk_malloc_init()) 
     return METIS_ERROR_MEMORY;
 
-  gk_sigtrap();
+  if (!gk_sigtrap()) {
+    gk_malloc_cleanup(0);
+    return METIS_ERROR_MEMORY;
+  }
 
-  if ((sigrval = gk_sigcatch()) != 0) 
+  METIS_SIGCATCH(sigrval);
+  if (sigrval != 0)
     goto SIGTHROW;
 
 
   /* set up the run time parameters */
-  ctrl = SetupCtrl(METIS_OP_OMETIS, options, 1, 3, NULL, NULL);
-  if (!ctrl) {
-    gk_siguntrap();
-    return METIS_ERROR_INPUT;
-  }
+  rstatus = SetupCtrl(METIS_OP_OMETIS, options, 1, 3, NULL, NULL,
+      (ctrl_t **)&ctrl);
+  if (rstatus != METIS_OK)
+    goto SIGTHROW;
 
   /* if required, change the numbering to 0 */
   if (ctrl->numflag == 1) {
@@ -79,9 +94,17 @@ int METIS_NodeND(idx_t *nvtxs, idx_t *xadj, idx_t *adjncy, idx_t *vwgt,
   /* prune the dense columns */
   if (ctrl->pfactor > 0.0) { 
     piperm = imalloc(*nvtxs, "OMETIS: piperm");
+    if (piperm == NULL) {
+      rstatus = METIS_ERROR_MEMORY;
+      goto SIGTHROW;
+    }
 
     graph = PruneGraph(ctrl, *nvtxs, xadj, adjncy, vwgt, piperm, ctrl->pfactor);
     if (graph == NULL) {
+      if (ctrl->status != METIS_OK) {
+        rstatus = ctrl->status;
+        goto SIGTHROW;
+      }
       /* if there was no prunning, cleanup the pfactor */
       gk_free((void **)&piperm, LTERM);
       ctrl->pfactor = 0.0;
@@ -97,9 +120,17 @@ int METIS_NodeND(idx_t *nvtxs, idx_t *xadj, idx_t *adjncy, idx_t *vwgt,
   if (ctrl->compress) { 
     cptr = imalloc(*nvtxs+1, "OMETIS: cptr");
     cind = imalloc(*nvtxs, "OMETIS: cind");
+    if (cptr == NULL || cind == NULL) {
+      rstatus = METIS_ERROR_MEMORY;
+      goto SIGTHROW;
+    }
 
     graph = CompressGraph(ctrl, *nvtxs, xadj, adjncy, vwgt, cptr, cind);
     if (graph == NULL) {
+      if (ctrl->status != METIS_OK) {
+        rstatus = ctrl->status;
+        goto SIGTHROW;
+      }
       /* if there was no compression, cleanup the compress flag */
       gk_free((void **)&cptr, &cind, LTERM);
       ctrl->compress = 0; 
@@ -114,19 +145,38 @@ int METIS_NodeND(idx_t *nvtxs, idx_t *xadj, idx_t *adjncy, idx_t *vwgt,
   }
 
   /* if no prunning and no compression, setup the graph in the normal way. */
-  if (ctrl->pfactor == 0.0 && ctrl->compress == 0) 
-    graph = SetupGraph(ctrl, *nvtxs, 1, xadj, adjncy, vwgt, NULL, NULL);
+  if (ctrl->pfactor == 0.0 && ctrl->compress == 0) {
+    rstatus = SetupGraph((ctrl_t *)ctrl, *nvtxs, 1, xadj, adjncy, vwgt,
+        NULL, NULL, &graph);
+    if (rstatus != METIS_OK)
+      goto SIGTHROW;
+  }
 
-  ASSERT(CheckGraph(graph, ctrl->numflag, 1));
+#if GKLIB_ASSERTIONS_ENABLED
+  errno = 0;
+  if (!CheckGraph(graph, ctrl->numflag, 1)) {
+    if (errno == ENOMEM || errno == EOVERFLOW) {
+      rstatus = METIS_ERROR_MEMORY;
+      goto SIGTHROW;
+    }
+    ASSERT(0);
+  }
+#endif
 
   /* allocate workspace memory */
-  AllocateWorkSpace(ctrl, graph);
+  rstatus = AllocateWorkSpace((ctrl_t *)ctrl, graph);
+  if (rstatus != METIS_OK)
+    goto SIGTHROW;
 
   /* do the nested dissection ordering  */
   if (ctrl->ccorder) 
     MlevelNestedDissectionCC(ctrl, graph, iperm, graph->nvtxs);
   else
     MlevelNestedDissection(ctrl, graph, iperm, graph->nvtxs);
+  if (ctrl->status != METIS_OK) {
+    rstatus = ctrl->status;
+    goto SIGTHROW;
+  }
 
 
   if (ctrl->pfactor > 0.0) { /* Order any prunned vertices */
@@ -158,17 +208,24 @@ int METIS_NodeND(idx_t *nvtxs, idx_t *xadj, idx_t *adjncy, idx_t *vwgt,
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, PrintTimers(ctrl));
 
   /* clean up */
-  FreeCtrl(&ctrl);
+  FreeCtrl((ctrl_t **)&ctrl);
 
 SIGTHROW:
+  if (ctrl != NULL)
+    graph_CleanupDiskFiles((ctrl_t *)ctrl);
+
   /* if required, change the numbering back to 1 */
-  if (renumber)
-    Change2FNumberingOrder(*nvtxs, xadj, adjncy, perm, iperm);
+  if (renumber) {
+    if (sigrval == 0 && rstatus == METIS_OK)
+      Change2FNumberingOrder(*nvtxs, xadj, adjncy, perm, iperm);
+    else
+      Change2FNumbering2(*nvtxs, xadj, adjncy);
+  }
 
   gk_siguntrap();
   gk_malloc_cleanup(0);
 
-  return metis_rcode(sigrval);
+  return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }
 
 
@@ -190,6 +247,10 @@ void MlevelNestedDissection(ctrl_t *ctrl, graph_t *graph, idx_t *order,
   nvtxs = graph->nvtxs;
 
   MlevelNodeBisectionMultiple(ctrl, graph);
+  if (ctrl->status != METIS_OK) {
+    FreeGraph(&graph);
+    return;
+  }
 
   IFSET(ctrl->dbglvl, METIS_DBG_SEPINFO, 
       printf("Nvtxs: %6"PRIDX", [%6"PRIDX" %6"PRIDX" %6"PRIDX"]\n", 
@@ -204,6 +265,12 @@ void MlevelNestedDissection(ctrl_t *ctrl, graph_t *graph, idx_t *order,
     order[label[bndind[i]]] = --lastvtx;
 
   SplitGraphOrder(ctrl, graph, &lgraph, &rgraph);
+  if (ctrl->status != METIS_OK) {
+    FreeGraph(&graph);
+    FreeGraph(&lgraph);
+    FreeGraph(&rgraph);
+    return;
+  }
 
   /* Free the memory of the top level graph */
   FreeGraph(&graph);
@@ -215,6 +282,10 @@ void MlevelNestedDissection(ctrl_t *ctrl, graph_t *graph, idx_t *order,
   else {
     MMDOrder(ctrl, lgraph, order, lastvtx-rgraph->nvtxs); 
     FreeGraph(&lgraph);
+  }
+  if (ctrl->status != METIS_OK) {
+    FreeGraph(&rgraph);
+    return;
   }
   if (rgraph->nvtxs > MMDSWITCH && rgraph->nedges > 0) 
     MlevelNestedDissection(ctrl, rgraph, order, lastvtx);
@@ -239,11 +310,15 @@ void MlevelNestedDissectionCC(ctrl_t *ctrl, graph_t *graph, idx_t *order,
   idx_t i, j, nvtxs, nbnd, ncmps, rnvtxs, snvtxs;
   idx_t *label, *bndind;
   idx_t *cptr, *cind;
-  graph_t **sgraphs;
+  graph_t **sgraphs=NULL;
 
   nvtxs = graph->nvtxs;
 
   MlevelNodeBisectionMultiple(ctrl, graph);
+  if (ctrl->status != METIS_OK) {
+    FreeGraph(&graph);
+    return;
+  }
 
   IFSET(ctrl->dbglvl, METIS_DBG_SEPINFO, 
       printf("Nvtxs: %6"PRIDX", [%6"PRIDX" %6"PRIDX" %6"PRIDX"]\n", 
@@ -256,10 +331,23 @@ void MlevelNestedDissectionCC(ctrl_t *ctrl, graph_t *graph, idx_t *order,
   for (i=0; i<nbnd; i++) 
     order[label[bndind[i]]] = --lastvtx;
 
-  WCOREPUSH;
+  if (!WCOREPUSH) {
+    FreeGraph(&graph);
+    return;
+  }
   cptr  = iwspacemalloc(ctrl, nvtxs+1);
   cind  = iwspacemalloc(ctrl, nvtxs);
+  if (cptr == NULL || cind == NULL) {
+    WCOREPOP;
+    FreeGraph(&graph);
+    return;
+  }
   ncmps = FindSepInducedComponents(ctrl, graph, cptr, cind);
+  if (ncmps < 0) {
+    WCOREPOP;
+    FreeGraph(&graph);
+    return;
+  }
 
   if (ctrl->dbglvl&METIS_DBG_INFO) {
     if (ncmps > 2)
@@ -269,6 +357,11 @@ void MlevelNestedDissectionCC(ctrl_t *ctrl, graph_t *graph, idx_t *order,
   sgraphs = SplitGraphOrderCC(ctrl, graph, ncmps, cptr, cind);
 
   WCOREPOP;
+
+  if (ctrl->status != METIS_OK || sgraphs == NULL) {
+    FreeGraph(&graph);
+    return;
+  }
 
   /* Free the memory of the top level graph */
   FreeGraph(&graph);
@@ -285,6 +378,11 @@ void MlevelNestedDissectionCC(ctrl_t *ctrl, graph_t *graph, idx_t *order,
     else {
       MMDOrder(ctrl, sgraphs[i], order, lastvtx-rnvtxs);
       FreeGraph(&sgraphs[i]);
+    }
+    if (ctrl->status != METIS_OK) {
+      for (j=i+1; j<ncmps; j++)
+        FreeGraph(&sgraphs[j]);
+      break;
     }
     rnvtxs += snvtxs;
   }
@@ -308,13 +406,22 @@ void MlevelNodeBisectionMultiple(ctrl_t *ctrl, graph_t *graph)
     return;
   }
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   bestwhere = iwspacemalloc(ctrl, graph->nvtxs);
+  if (bestwhere == NULL) {
+    WCOREPOP;
+    return;
+  }
 
   mincut = graph->tvwgt[0];
   for (i=0; i<ctrl->nseps; i++) {
     MlevelNodeBisectionL2(ctrl, graph, LARGENIPARTS);
+    if (ctrl->status != METIS_OK) {
+      WCOREPOP;
+      return;
+    }
 
     if (i == 0 || graph->mincut < mincut) {
       mincut = graph->mincut;
@@ -354,17 +461,30 @@ void MlevelNodeBisectionL2(ctrl_t *ctrl, graph_t *graph, idx_t niparts)
     return;
   }
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   ctrl->CoarsenTo = gk_max(100, graph->nvtxs/30);
 
   cgraph = CoarsenGraphNlevels(ctrl, graph, 4);
+  if (cgraph == NULL) {
+    WCOREPOP;
+    return;
+  }
 
   bestwhere = iwspacemalloc(ctrl, cgraph->nvtxs);
+  if (bestwhere == NULL) {
+    WCOREPOP;
+    return;
+  }
 
   mincut = graph->tvwgt[0];
   for (i=0; i<nruns; i++) {
     MlevelNodeBisectionL1(ctrl, cgraph, 0.7*niparts);
+    if (ctrl->status != METIS_OK) {
+      WCOREPOP;
+      return;
+    }
 
     if (i == 0 || cgraph->mincut < mincut) {
       mincut = cgraph->mincut;
@@ -403,10 +523,14 @@ void MlevelNodeBisectionL1(ctrl_t *ctrl, graph_t *graph, idx_t niparts)
     ctrl->CoarsenTo = 40;
 
   cgraph = CoarsenGraph(ctrl, graph);
+  if (cgraph == NULL)
+    return;
 
   niparts = gk_max(1, (cgraph->nvtxs <= ctrl->CoarsenTo ? niparts/2: niparts));
   /*niparts = (cgraph->nvtxs <= ctrl->CoarsenTo ? SMALLNIPARTS : LARGENIPARTS);*/
   InitSeparator(ctrl, cgraph, niparts);
+  if (ctrl->status != METIS_OK)
+    return;
 
   Refine2WayNode(ctrl, graph, cgraph);
 }
@@ -427,9 +551,11 @@ void SplitGraphOrder(ctrl_t *ctrl, graph_t *graph, graph_t **r_lgraph,
   idx_t *sxadj[2], *svwgt[2], *sadjncy[2], *sadjwgt[2], *slabel[2];
   idx_t *rename;
   idx_t *auxadjncy;
-  graph_t *lgraph, *rgraph;
+  graph_t *lgraph=NULL, *rgraph=NULL;
 
-  WCOREPUSH;
+  *r_lgraph = *r_rgraph = NULL;
+  if (!WCOREPUSH)
+    return;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->SplitTmr));
 
@@ -445,6 +571,8 @@ void SplitGraphOrder(ctrl_t *ctrl, graph_t *graph, graph_t **r_lgraph,
   ASSERT(bndptr != NULL);
 
   rename = iwspacemalloc(ctrl, nvtxs);
+  if (rename == NULL)
+    goto MEMORY_ERROR;
   
   snvtxs[0] = snvtxs[1] = snvtxs[2] = snedges[0] = snedges[1] = snedges[2] = 0;
   for (i=0; i<nvtxs; i++) {
@@ -453,14 +581,16 @@ void SplitGraphOrder(ctrl_t *ctrl, graph_t *graph, graph_t **r_lgraph,
     snedges[k] += xadj[i+1]-xadj[i];
   }
 
-  lgraph      = SetupSplitGraph(graph, snvtxs[0], snedges[0]);
+  if (SetupSplitGraph(graph, snvtxs[0], snedges[0], &lgraph) != METIS_OK)
+    goto MEMORY_ERROR;
   sxadj[0]    = lgraph->xadj;
   svwgt[0]    = lgraph->vwgt;
   sadjncy[0]  = lgraph->adjncy; 
   sadjwgt[0]  = lgraph->adjwgt; 
   slabel[0]   = lgraph->label;
 
-  rgraph      = SetupSplitGraph(graph, snvtxs[1], snedges[1]);
+  if (SetupSplitGraph(graph, snvtxs[1], snedges[1], &rgraph) != METIS_OK)
+    goto MEMORY_ERROR;
   sxadj[1]    = rgraph->xadj;
   svwgt[1]    = rgraph->vwgt;
   sadjncy[1]  = rgraph->adjncy; 
@@ -513,14 +643,22 @@ void SplitGraphOrder(ctrl_t *ctrl, graph_t *graph, graph_t **r_lgraph,
   rgraph->nvtxs  = snvtxs[1];
   rgraph->nedges = snedges[1];
 
-  SetupGraph_tvwgt(lgraph);
-  SetupGraph_tvwgt(rgraph);
+  if (SetupGraph_tvwgt(lgraph) != METIS_OK ||
+      SetupGraph_tvwgt(rgraph) != METIS_OK)
+    goto MEMORY_ERROR;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->SplitTmr));
 
   *r_lgraph = lgraph;
   *r_rgraph = rgraph;
 
+  WCOREPOP;
+  return;
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  FreeGraph(&lgraph);
+  FreeGraph(&rgraph);
   WCOREPOP;
 }
 
@@ -552,9 +690,10 @@ graph_t **SplitGraphOrderCC(ctrl_t *ctrl, graph_t *graph, idx_t ncmps,
   idx_t *sxadj, *svwgt, *sadjncy, *sadjwgt, *slabel;
   idx_t *rename;
   idx_t *auxadjncy;
-  graph_t **sgraphs;
+  graph_t **sgraphs=NULL;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return NULL;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->SplitTmr));
 
@@ -577,8 +716,16 @@ graph_t **SplitGraphOrderCC(ctrl_t *ctrl, graph_t *graph, idx_t ncmps,
   }
 
   rename = iwspacemalloc(ctrl, nvtxs);
+  if (rename == NULL)
+    goto MEMORY_ERROR;
   
+  if (ncmps < 0 || (uintmax_t)ncmps >
+      (uintmax_t)SIZE_MAX/sizeof(graph_t *))
+    goto MEMORY_ERROR;
   sgraphs = (graph_t **)gk_malloc(sizeof(graph_t *)*ncmps, "SplitGraphOrderCC: sgraphs");
+  if (sgraphs == NULL)
+    goto MEMORY_ERROR;
+  memset(sgraphs, 0, sizeof(graph_t *)*ncmps);
 
   /* Go and split the graph a component at a time */
   for (iii=0; iii<ncmps; iii++) {
@@ -590,7 +737,8 @@ graph_t **SplitGraphOrderCC(ctrl_t *ctrl, graph_t *graph, idx_t ncmps,
       snedges += xadj[i+1]-xadj[i];
     }
 
-    sgraphs[iii] = SetupSplitGraph(graph, snvtxs, snedges);
+    if (SetupSplitGraph(graph, snvtxs, snedges, &sgraphs[iii]) != METIS_OK)
+      goto MEMORY_ERROR;
 
     sxadj    = sgraphs[iii]->xadj;
     svwgt    = sgraphs[iii]->vwgt;
@@ -630,7 +778,8 @@ graph_t **SplitGraphOrderCC(ctrl_t *ctrl, graph_t *graph, idx_t ncmps,
     sgraphs[iii]->nvtxs  = snvtxs;
     sgraphs[iii]->nedges = snedges;
 
-    SetupGraph_tvwgt(sgraphs[iii]);
+    if (SetupGraph_tvwgt(sgraphs[iii]) != METIS_OK)
+      goto MEMORY_ERROR;
   }
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->SplitTmr));
@@ -638,6 +787,16 @@ graph_t **SplitGraphOrderCC(ctrl_t *ctrl, graph_t *graph, idx_t ncmps,
   WCOREPOP;
 
   return sgraphs;
+
+MEMORY_ERROR:
+  ctrl->status = METIS_ERROR_MEMORY;
+  if (sgraphs != NULL) {
+    for (i=0; i<ncmps; i++)
+      FreeGraph(&sgraphs[i]);
+  }
+  gk_free((void **)&sgraphs, LTERM);
+  WCOREPOP;
+  return NULL;
 }
 
 
@@ -651,7 +810,14 @@ void MMDOrder(ctrl_t *ctrl, graph_t *graph, idx_t *order, idx_t lastvtx)
   idx_t *xadj, *adjncy, *label;
   idx_t *perm, *iperm, *head, *qsize, *list, *marker;
 
-  WCOREPUSH;
+  if (graph->nvtxs > IDX_MAX-5) {
+    errno = EOVERFLOW;
+    ctrl->status = METIS_ERROR_MEMORY;
+    return;
+  }
+
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -670,6 +836,16 @@ void MMDOrder(ctrl_t *ctrl, graph_t *graph, idx_t *order, idx_t lastvtx)
   qsize  = iwspacemalloc(ctrl, nvtxs+5);
   list   = iwspacemalloc(ctrl, nvtxs+5);
   marker = iwspacemalloc(ctrl, nvtxs+5);
+  if (perm == NULL || iperm == NULL || head == NULL || qsize == NULL ||
+      list == NULL || marker == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    for (i=0; i<k; i++)
+      adjncy[i]--;
+    for (i=0; i<nvtxs+1; i++)
+      xadj[i]--;
+    WCOREPOP;
+    return;
+  }
 
   genmmd(nvtxs, xadj, adjncy, iperm, perm, 1, head, qsize, list, marker, IDX_MAX, &nofsub);
 
@@ -683,8 +859,3 @@ void MMDOrder(ctrl_t *ctrl, graph_t *graph, idx_t *order, idx_t lastvtx)
 
   WCOREPOP;
 }
-
-
-
-
-

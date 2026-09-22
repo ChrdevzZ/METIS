@@ -39,18 +39,40 @@
 *  cover : the actual cover (array)
 *  csize : the size of the cover
 **************************************************************************/
-void MinCover(idx_t *xadj, idx_t *adjncy, idx_t asize, idx_t bsize, idx_t *cover, idx_t *csize)
+int MinCover(idx_t *xadj, idx_t *adjncy, idx_t asize, idx_t bsize, idx_t *cover, idx_t *csize)
 {
   idx_t i, j;
-  idx_t *mate, *queue, *flag, *level, *lst;
+  idx_t *mate=NULL, *queue=NULL, *flag=NULL, *level=NULL, *lst=NULL;
   idx_t fptr, rptr, lstptr;
   idx_t row, maxlevel, col;
+  int sigrval, status;
 
-  mate = ismalloc(bsize, -1, "MinCover: mate");
-  flag = imalloc(bsize, "MinCover: flag");
-  level = imalloc(bsize, "MinCover: level");
-  queue = imalloc(bsize, "MinCover: queue");
-  lst = imalloc(bsize, "MinCover: lst");
+  if (xadj == NULL || adjncy == NULL || cover == NULL || csize == NULL ||
+      asize < 0 || bsize < asize) {
+    errno = EINVAL;
+    return METIS_ERROR_INPUT;
+  }
+  if ((uintmax_t)bsize > (uintmax_t)SIZE_MAX/sizeof(idx_t)) {
+    errno = EOVERFLOW;
+    return METIS_ERROR_MEMORY;
+  }
+
+  mate = iMallocNoSignal((size_t)bsize, "MinCover: mate", &sigrval);
+  if (mate == NULL)
+    goto MEMORY_ERROR;
+  flag = iMallocNoSignal((size_t)bsize, "MinCover: flag", &sigrval);
+  if (flag == NULL)
+    goto MEMORY_ERROR;
+  level = iMallocNoSignal((size_t)bsize, "MinCover: level", &sigrval);
+  if (level == NULL)
+    goto MEMORY_ERROR;
+  queue = iMallocNoSignal((size_t)bsize, "MinCover: queue", &sigrval);
+  if (queue == NULL)
+    goto MEMORY_ERROR;
+  lst = iMallocNoSignal((size_t)bsize, "MinCover: lst", &sigrval);
+  if (lst == NULL)
+    goto MEMORY_ERROR;
+  iset(bsize, -1, mate);
 
   /* Get a cheap matching */
   for (i=0; i<asize; i++) {
@@ -113,10 +135,16 @@ void MinCover(idx_t *xadj, idx_t *adjncy, idx_t asize, idx_t bsize, idx_t *cover
       MinCover_Augment(xadj, adjncy, lst[i], mate, flag, level, maxlevel);
   }
 
-  MinCover_Decompose(xadj, adjncy, asize, bsize, mate, cover, csize);
+  status = MinCover_Decompose(xadj, adjncy, asize, bsize, mate, cover,
+      csize);
 
   gk_free((void **)&mate, &flag, &level, &queue, &lst, LTERM);
 
+  return status;
+
+MEMORY_ERROR:
+  gk_free((void **)&mate, &flag, &level, &queue, &lst, LTERM);
+  return METIS_ERROR_MEMORY;
 }
 
 
@@ -160,13 +188,27 @@ idx_t MinCover_Augment(idx_t *xadj, idx_t *adjncy, idx_t col, idx_t *mate, idx_t
 * min-cover.
 * REF: Pothen ACMTrans. on Amth Software
 **************************************************************************/
-void MinCover_Decompose(idx_t *xadj, idx_t *adjncy, idx_t asize, idx_t bsize, idx_t *mate, idx_t *cover, idx_t *csize)
+int MinCover_Decompose(idx_t *xadj, idx_t *adjncy, idx_t asize, idx_t bsize, idx_t *mate, idx_t *cover, idx_t *csize)
 {
   idx_t i, k;
   idx_t *where;
   idx_t card[10];
+  int sigrval;
 
-  where = imalloc(bsize, "MinCover_Decompose: where");
+  if (xadj == NULL || adjncy == NULL || mate == NULL || cover == NULL ||
+      csize == NULL || asize < 0 || bsize < asize) {
+    errno = EINVAL;
+    return METIS_ERROR_INPUT;
+  }
+  if ((uintmax_t)bsize > (uintmax_t)SIZE_MAX/sizeof(idx_t)) {
+    errno = EOVERFLOW;
+    return METIS_ERROR_MEMORY;
+  }
+
+  where = iMallocNoSignal((size_t)bsize,
+      "MinCover_Decompose: where", &sigrval);
+  if (where == NULL)
+    return METIS_ERROR_MEMORY;
   for (i=0; i<10; i++)
     card[i] = 0;
 
@@ -202,6 +244,7 @@ void MinCover_Decompose(idx_t *xadj, idx_t *adjncy, idx_t asize, idx_t bsize, id
   *csize = k;
   gk_free((void **)&where, LTERM);
 
+  return METIS_OK;
 }
 
 

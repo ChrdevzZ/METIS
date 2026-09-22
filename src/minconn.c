@@ -12,6 +12,45 @@
 
 
 /*************************************************************************/
+/*! Resizes paired sparse-subdomain arrays as one failure transaction.
+
+    The ID array is staged separately before the weight array is reallocated.
+    If the second operation fails, the staged copy is released before a
+    memory signal is rethrown and both caller-owned pointers remain unchanged.
+*/
+/*************************************************************************/
+static int ResizeSubDomainArrays(idx_t **r_adids, idx_t **r_adwgts,
+    idx_t ncopy, idx_t newsize, const char *message)
+{
+  idx_t *new_adids, *new_adwgts;
+  int sigrval, saved_errno;
+
+  new_adids = imalloc(newsize, message);
+  if (new_adids == NULL)
+    return 0;
+  if (ncopy > 0)
+    icopy(ncopy, *r_adids, new_adids);
+
+  new_adwgts = iReallocNoSignal(*r_adwgts, (size_t)newsize,
+      message, &sigrval);
+  if (new_adwgts == NULL) {
+    saved_errno = errno != 0 ? errno : ENOMEM;
+    gk_free((void **)&new_adids, LTERM);
+    errno = saved_errno;
+    if (sigrval != 0)
+      gk_errexit(SIGMEM,
+          "Failed to resize sparse-subdomain arrays");
+    return 0;
+  }
+
+  gk_free((void **)r_adids, LTERM);
+  *r_adids = new_adids;
+  *r_adwgts = new_adwgts;
+  return 1;
+}
+
+
+/*************************************************************************/
 /*! This function computes the subdomain graph storing the result in the
     pre-allocated workspace arrays */
 /*************************************************************************/
@@ -20,9 +59,10 @@ void ComputeSubDomainGraph(ctrl_t *ctrl, graph_t *graph)
   idx_t i, ii, j, pid, other, nparts, nvtxs, nnbrs;
   idx_t *xadj, *adjncy, *adjwgt, *where;
   idx_t *pptr, *pind;
-  idx_t nads=0, *vadids, *vadwgts;
+  idx_t nads=0, newmax, *vadids, *vadwgts;
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -37,6 +77,11 @@ void ComputeSubDomainGraph(ctrl_t *ctrl, graph_t *graph)
 
   pptr = iwspacemalloc(ctrl, nparts+1);
   pind = iwspacemalloc(ctrl, nvtxs);
+  if (pptr == NULL || pind == NULL) {
+    ctrl->status = METIS_ERROR_MEMORY;
+    WCOREPOP;
+    return;
+  }
   iarray2csr(nvtxs, nparts, where, pptr, pind);
 
   for (pid=0; pid<nparts; pid++) {
@@ -97,11 +142,23 @@ void ComputeSubDomainGraph(ctrl_t *ctrl, graph_t *graph)
 
     /* See if you have enough memory to store the adjacent info for that subdomain */
     if (ctrl->maxnads[pid] < nads) {
-      ctrl->maxnads[pid] = 2*nads;
-      ctrl->adids[pid]   = irealloc(ctrl->adids[pid], ctrl->maxnads[pid], 
-                               "ComputeSubDomainGraph: adids[pid]");
-      ctrl->adwgts[pid]  = irealloc(ctrl->adwgts[pid], ctrl->maxnads[pid], 
-                               "ComputeSubDomainGraph: adids[pid]");
+      if (nads > IDX_MAX/2) {
+        ctrl->status = METIS_ERROR_MEMORY;
+        WCOREPOP;
+        errno = EOVERFLOW;
+        gk_errexit(SIGMEM,
+            "ComputeSubDomainGraph: adjacency capacity overflow");
+        return;
+      }
+      newmax = 2*nads;
+
+      if (!ResizeSubDomainArrays(&ctrl->adids[pid], &ctrl->adwgts[pid],
+          0, newmax, "ComputeSubDomainGraph: adjacency arrays")) {
+        ctrl->status = METIS_ERROR_MEMORY;
+        WCOREPOP;
+        return;
+      }
+      ctrl->maxnads[pid] = newmax;
     }
 
     ctrl->nads[pid] = nads;
@@ -134,7 +191,7 @@ void ComputeSubDomainGraph(ctrl_t *ctrl, graph_t *graph)
 void UpdateEdgeSubDomainGraph(ctrl_t *ctrl, idx_t u, idx_t v, idx_t ewgt, 
          idx_t *r_maxndoms)
 {
-  idx_t i, j, nads;
+  idx_t i, j, nads, newmax;
 
   if (ewgt == 0)
     return;
@@ -153,11 +210,21 @@ void UpdateEdgeSubDomainGraph(ctrl_t *ctrl, idx_t u, idx_t v, idx_t ewgt,
       /* Deal with the case in which the edge was not found */
       ASSERT(ewgt > 0);
       if (ctrl->maxnads[u] == nads) {
-        ctrl->maxnads[u] = 2*(nads+1);
-        ctrl->adids[u]   = irealloc(ctrl->adids[u], ctrl->maxnads[u], 
-                               "IncreaseEdgeSubDomainGraph: adids[pid]");
-        ctrl->adwgts[u]  = irealloc(ctrl->adwgts[u], ctrl->maxnads[u], 
-                               "IncreaseEdgeSubDomainGraph: adids[pid]");
+        if (nads >= IDX_MAX/2) {
+          ctrl->status = METIS_ERROR_MEMORY;
+          errno = EOVERFLOW;
+          gk_errexit(SIGMEM,
+              "UpdateEdgeSubDomainGraph: adjacency capacity overflow");
+          return;
+        }
+        newmax = 2*(nads+1);
+
+        if (!ResizeSubDomainArrays(&ctrl->adids[u], &ctrl->adwgts[u],
+            nads, newmax, "UpdateEdgeSubDomainGraph: adjacency arrays")) {
+          ctrl->status = METIS_ERROR_MEMORY;
+          return;
+        }
+        ctrl->maxnads[u] = newmax;
       }
       ctrl->adids[u][nads]  = v;
       ctrl->adwgts[u][nads] = ewgt;
@@ -204,7 +271,8 @@ void EliminateSubDomainEdges(ctrl_t *ctrl, graph_t *graph)
   idx_t *pptr, *pind;
   idx_t *vmarker=NULL, *pmarker=NULL, *modind=NULL;  /* volume specific work arrays */
 
-  WCOREPUSH;
+  if (!WCOREPUSH)
+    return;
 
   nvtxs  = graph->nvtxs;
   ncon   = graph->ncon;
@@ -222,25 +290,36 @@ void EliminateSubDomainEdges(ctrl_t *ctrl, graph_t *graph)
   cpwgt     = iwspacemalloc(ctrl, ncon);
   maxpwgt   = iwspacemalloc(ctrl, nparts*ncon);
   ind       = iwspacemalloc(ctrl, nvtxs);
-  otherpmat = iset(nparts, 0, iwspacemalloc(ctrl, nparts));
+  otherpmat = iwspacemalloc(ctrl, nparts);
 
   cand  = ikvwspacemalloc(ctrl, nparts);
   cand2 = ikvwspacemalloc(ctrl, nparts);
 
   pptr = iwspacemalloc(ctrl, nparts+1);
   pind = iwspacemalloc(ctrl, nvtxs);
+  if (cpwgt == NULL || maxpwgt == NULL || ind == NULL ||
+      otherpmat == NULL || cand == NULL || cand2 == NULL ||
+      pptr == NULL || pind == NULL)
+    goto ERROR;
+  iset(nparts, 0, otherpmat);
   iarray2csr(nvtxs, nparts, where, pptr, pind);
 
   if (ctrl->objtype == METIS_OBJTYPE_VOL) {
     /* Vol-refinement specific working arrays */
     modind  = iwspacemalloc(ctrl, nvtxs);
-    vmarker = iset(nvtxs, 0, iwspacemalloc(ctrl, nvtxs));
-    pmarker = iset(nparts, -1, iwspacemalloc(ctrl, nparts));
+    vmarker = iwspacemalloc(ctrl, nvtxs);
+    pmarker = iwspacemalloc(ctrl, nparts);
+    if (modind == NULL || vmarker == NULL || pmarker == NULL)
+      goto ERROR;
+    iset(nvtxs, 0, vmarker);
+    iset(nparts, -1, pmarker);
   }
 
 
   /* Compute the pmat matrix and ndoms */
   ComputeSubDomainGraph(ctrl, graph);
+  if (ctrl->status != METIS_OK)
+    goto ERROR;
 
   nads   = ctrl->nads;
   adids  = ctrl->adids;
@@ -252,8 +331,8 @@ void EliminateSubDomainEdges(ctrl_t *ctrl, graph_t *graph)
   /* Compute the maximum allowed weight for each domain */
   for (i=0; i<nparts; i++) {
     for (j=0; j<ncon; j++)
-      maxpwgt[i*ncon+j] = 
-          (ncon == 1 ? 1.25 : 1.025)*tpwgts[i]*graph->tvwgt[j]*ctrl->ubfactors[j];
+      maxpwgt[i*ncon+j] = rToIdx((ncon == 1 ? 1.25 : 1.025)*
+          tpwgts[i]*graph->tvwgt[j]*ctrl->ubfactors[j]);
   }
 
   ipqInit(&queue, nparts);
@@ -287,7 +366,7 @@ void EliminateSubDomainEdges(ctrl_t *ctrl, graph_t *graph)
         mypmat[adids[me][i]] = adwgts[me][i];
 
         /* keep track of the weakly connected adjacent subdomains */
-        if (2*nads[me]*adwgts[me][i] < totalout) {
+        if (adwgts[me][i] <= ((totalout-1)/nads[me])/2) {
           cand2[ncand2].val   = adids[me][i];
           cand2[ncand2++].key = adwgts[me][i];
         }
@@ -455,6 +534,8 @@ void EliminateSubDomainEdges(ctrl_t *ctrl, graph_t *graph)
           default:
             gk_errexit(SIGERR, "Unknown objtype of %d\n", ctrl->objtype);
         }
+        if (ctrl->status != METIS_OK)
+          goto ERROR_QUEUE;
 
         /* Update the csr representation of the partitioning vector */
         iarray2csr(nvtxs, nparts, where, pptr, pind);
@@ -467,6 +548,14 @@ void EliminateSubDomainEdges(ctrl_t *ctrl, graph_t *graph)
 
   ipqFree(&queue);
 
+  WCOREPOP;
+  return;
+
+ERROR_QUEUE:
+  ipqFree(&queue);
+ERROR:
+  if (ctrl->status == METIS_OK)
+    ctrl->status = METIS_ERROR_MEMORY;
   WCOREPOP;
 }
 
@@ -502,6 +591,8 @@ void MoveGroupMinConnForCut(ctrl_t *ctrl, graph_t *graph, idx_t to, idx_t nind,
       myrinfo->inbr  = cnbrpoolGetNext(ctrl, xadj[i+1]-xadj[i]);
       myrinfo->nnbrs = 0;
     }
+    if (myrinfo->inbr == -1)
+      return;
     mynbrs = ctrl->cnbrpool + myrinfo->inbr;
 
     /* find the location of 'to' in myrinfo or create it if it is not there */
@@ -525,6 +616,8 @@ void MoveGroupMinConnForCut(ctrl_t *ctrl, graph_t *graph, idx_t to, idx_t nind,
 
     /* Update subdomain connectivity graph to reflect the move of 'i' */
     UpdateEdgeSubDomainGraph(ctrl, from, to, myrinfo->id-mynbrs[k].ed, NULL);
+    if (ctrl->status != METIS_OK)
+      return;
 
     /* Update ID/ED and BND related information for the moved vertex */
     UpdateMovedVertexInfoAndBND(i, from, k, to, myrinfo, mynbrs, where, nbnd, 
@@ -543,7 +636,11 @@ void MoveGroupMinConnForCut(ctrl_t *ctrl, graph_t *graph, idx_t to, idx_t nind,
          than 'from' and 'to' */
       if (me != from && me != to) {
         UpdateEdgeSubDomainGraph(ctrl, from, me, -adjwgt[j], NULL);
+        if (ctrl->status != METIS_OK)
+          return;
         UpdateEdgeSubDomainGraph(ctrl, to, me, adjwgt[j], NULL);
+        if (ctrl->status != METIS_OK)
+          return;
       }
     }
   }
@@ -581,6 +678,8 @@ void MoveGroupMinConnForVol(ctrl_t *ctrl, graph_t *graph, idx_t to, idx_t nind,
       myrinfo->inbr  = vnbrpoolGetNext(ctrl, xadj[i+1]-xadj[i]);
       myrinfo->nnbrs = 0;
     }
+    if (myrinfo->inbr == -1)
+      return;
     mynbrs = ctrl->vnbrpool + myrinfo->inbr;
 
     xgain = (myrinfo->nid == 0 && myrinfo->ned > 0 ? vsize[i] : 0);
@@ -654,19 +753,27 @@ void MoveGroupMinConnForVol(ctrl_t *ctrl, graph_t *graph, idx_t to, idx_t nind,
 
     /* Update subdomain connectivity graph to reflect the move of 'i' */
     UpdateEdgeSubDomainGraph(ctrl, from, to, ewgt, NULL);
+    if (ctrl->status != METIS_OK)
+      return;
 
     /* Update the subdomain connectivity of the adjacent vertices */
     for (j=xadj[i]; j<xadj[i+1]; j++) {
       me = where[adjncy[j]];
       if (me != from && me != to) {
         UpdateEdgeSubDomainGraph(ctrl, from, me, -1, NULL);
+        if (ctrl->status != METIS_OK)
+          return;
         UpdateEdgeSubDomainGraph(ctrl, to, me, 1, NULL);
+        if (ctrl->status != METIS_OK)
+          return;
       }
     }
 
     /* Update the id/ed/gains/bnd of potentially affected nodes */
     KWayVolUpdate(ctrl, graph, i, from, to, NULL, NULL, NULL, NULL,
         NULL, BNDTYPE_REFINE, vmarker, pmarker, modind);
+    if (ctrl->status != METIS_OK)
+      return;
 
     /*CheckKWayVolPartitionParams(ctrl, graph);*/
   }
@@ -686,13 +793,32 @@ void PrintSubDomainGraph(graph_t *graph, idx_t nparts, idx_t *where)
 {
   idx_t i, j, k, me, nvtxs, total, max;
   idx_t *xadj, *adjncy, *adjwgt, *pmat;
+  size_t pmat_size;
+
+  if (graph == NULL || nparts <= 0 || where == NULL) {
+    errno = EINVAL;
+    gk_errexit(SIGERR, "Invalid subdomain graph dimensions.\n");
+    errno = EINVAL;
+    return;
+  }
+  if (nparts > IDX_MAX/nparts ||
+      (uintmax_t)nparts >
+          (uintmax_t)SIZE_MAX/sizeof(idx_t)/(uintmax_t)nparts) {
+    errno = EOVERFLOW;
+    gk_errexit(SIGMEM, "Subdomain graph size overflow.\n");
+    errno = EOVERFLOW;
+    return;
+  }
+  pmat_size = (size_t)nparts*(size_t)nparts;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
   adjncy = graph->adjncy;
   adjwgt = graph->adjwgt;
 
-  pmat = ismalloc(nparts*nparts, 0, "ComputeSubDomainGraph: pmat");
+  pmat = ismalloc(pmat_size, 0, "ComputeSubDomainGraph: pmat");
+  if (pmat == NULL)
+    return;
 
   for (i=0; i<nvtxs; i++) {
     me = where[i];
@@ -727,5 +853,3 @@ void PrintSubDomainGraph(graph_t *graph, idx_t nparts, idx_t *where)
 
   gk_free((void **)&pmat, LTERM);
 }
-
-

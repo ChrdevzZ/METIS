@@ -35,3 +35,8 @@ if(NOT output MATCHES "Gain:[ ]+[-0-9]+[ ]+\\[[ ]*N/A\\]")
   message(FATAL_ERROR
     "move-info diagnostics did not exercise a single-queue move:\n${output}")
 endif()
+
+if(NOT output MATCHES "Operation Count:[ ]+[0-9]+\\.[0-9]+e\\+0*10")
+  message(FATAL_ERROR
+    "fill-in reporting did not preserve its 64-bit operation count:\n${output}")
+endif()
