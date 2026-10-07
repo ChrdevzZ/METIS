@@ -126,12 +126,12 @@ elseif(TEST_MODE STREQUAL "config-reconfigure")
   run_probe_configure(config-switch
     -DPROBE_EXPECT_RESULT=TRUE
     -DCMAKE_BUILD_TYPE=ProbeConfig
-    -DCMAKE_TRY_COMPILE_CONFIGURATION=ProbeConfig
+    -DPROBE_ACTIVE_CONFIG=ProbeConfig
     -DCMAKE_C_FLAGS_PROBECONFIG=-DPROBE_CONFIG_VALID=1)
   run_probe_configure(config-switch
     -DPROBE_EXPECT_RESULT=FALSE
     -DCMAKE_BUILD_TYPE=ProbeConfig
-    -DCMAKE_TRY_COMPILE_CONFIGURATION=ProbeConfig
+    -DPROBE_ACTIVE_CONFIG=ProbeConfig
     -DCMAKE_C_FLAGS_PROBECONFIG=-DPROBE_CONFIG_BREAK=1)
 elseif(TEST_MODE STREQUAL "gprof")
   run_probe_configure(gprof)

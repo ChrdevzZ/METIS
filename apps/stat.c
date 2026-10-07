@@ -26,7 +26,7 @@ int ComputePartitionInfo(params_t *params, graph_t *graph, idx_t *where)
   idx_t *pptr=NULL, *pind=NULL, *pdom=NULL;
   idx_t gncmps=0, ncmps, nover=0, *cptr=NULL, *cind=NULL, *cpwgts=NULL;
   size_t nwgt;
-  int sigrval;
+  int sigrval, saved_errno;
 
   if (params == NULL || graph == NULL || where == NULL ||
       graph->nvtxs <= 0 || graph->ncon <= 0 || params->nparts <= 0 ||
@@ -75,14 +75,14 @@ int ComputePartitionInfo(params_t *params, graph_t *graph, idx_t *where)
   /* Compute objective-related information */
   volume = ComputeVolume(graph, where);
   if (volume < 0)
-    goto MEMORY_ERROR;
+    goto ERROR;
 
 
   /* Compute constraint-related information */
   kpwgts = iMallocNoSignal(nwgt,
       "ComputePartitionInfo: kpwgts", &sigrval);
   if (kpwgts == NULL)
-    goto MEMORY_ERROR;
+    goto ERROR;
   iset(nwgt, 0, kpwgts);
 
   for (i=0; i<nvtxs; i++) {
@@ -93,12 +93,16 @@ int ComputePartitionInfo(params_t *params, graph_t *graph, idx_t *where)
   /* Compute subdomain adjacency information */
   pptr = iMallocNoSignal((size_t)nparts+1,
       "ComputePartitionInfo: pptr", &sigrval);
+  if (pptr == NULL)
+    goto ERROR;
   pind = iMallocNoSignal((size_t)nvtxs,
       "ComputePartitionInfo: pind", &sigrval);
+  if (pind == NULL)
+    goto ERROR;
   pdom = iMallocNoSignal((size_t)nparts,
       "ComputePartitionInfo: pdom", &sigrval);
-  if (pptr == NULL || pind == NULL || pdom == NULL)
-    goto MEMORY_ERROR;
+  if (pdom == NULL)
+    goto ERROR;
 
   iarray2csr(nvtxs, nparts, where, pptr, pind);
 
@@ -124,21 +128,25 @@ int ComputePartitionInfo(params_t *params, graph_t *graph, idx_t *where)
   /* Compute subdomain adjacency information */
   cptr = iMallocNoSignal((size_t)nvtxs+1,
       "ComputePartitionInfo: cptr", &sigrval);
+  if (cptr == NULL)
+    goto ERROR;
   cind = iMallocNoSignal((size_t)nvtxs,
       "ComputePartitionInfo: cind", &sigrval);
+  if (cind == NULL)
+    goto ERROR;
   cpwgts = iMallocNoSignal((size_t)nparts,
       "ComputePartitionInfo: cpwgts", &sigrval);
-  if (cptr == NULL || cind == NULL || cpwgts == NULL)
-    goto MEMORY_ERROR;
+  if (cpwgts == NULL)
+    goto ERROR;
   iset(nparts, 0, cpwgts);
 
   ncmps = FindPartitionInducedComponents(graph, where, cptr, cind);
   if (ncmps < 0)
-    goto MEMORY_ERROR;
+    goto ERROR;
   if (ncmps != nparts) {
     gncmps = FindPartitionInducedComponents(graph, NULL, NULL, NULL);
     if (gncmps < 0)
-      goto MEMORY_ERROR;
+      goto ERROR;
     if (gncmps == 1) {
       for (nover=0, i=0; i<ncmps; i++) {
         cpwgts[where[cind[cptr[i]]]]++;
@@ -205,12 +213,12 @@ int ComputePartitionInfo(params_t *params, graph_t *graph, idx_t *where)
 
   return METIS_OK;
 
-MEMORY_ERROR:
+ERROR:
+  saved_errno = errno != 0 ? errno : ENOMEM;
   gk_free((void **)&kpwgts, &pptr, &pind, &pdom,
       &cptr, &cind, &cpwgts, LTERM);
-  if (errno == 0)
-    errno = ENOMEM;
-  return METIS_ERROR_MEMORY;
+  errno = saved_errno;
+  return metis_errno_error();
 }
 
 

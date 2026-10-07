@@ -1,6 +1,77 @@
 include_guard(GLOBAL)
 
 
+function(metis_test_check_link_wrap result)
+  # A final link must resolve a reference from another translation unit only
+  # when wrapping is active. An accepted but ignored option is insufficient.
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+  if(NOT CMAKE_TRY_COMPILE_CONFIGURATION)
+    if(CMAKE_CONFIGURATION_TYPES)
+      list(GET CMAKE_CONFIGURATION_TYPES 0 CMAKE_TRY_COMPILE_CONFIGURATION)
+    else()
+      set(CMAKE_TRY_COMPILE_CONFIGURATION "${CMAKE_BUILD_TYPE}")
+    endif()
+  endif()
+  string(TOUPPER "${CMAKE_TRY_COMPILE_CONFIGURATION}" _config)
+  list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
+    CMAKE_CONFIGURATION_TYPES
+    "CMAKE_C_FLAGS_${_config}" "CMAKE_EXE_LINKER_FLAGS_${_config}")
+  set(_work "${CMAKE_CURRENT_BINARY_DIR}/link-wrap")
+  file(MAKE_DIRECTORY "${_work}")
+  file(WRITE "${_work}/caller.c" [=[
+extern int metis_test_missing(void);
+int main(void) { return metis_test_missing() == 37 ? 0 : 1; }
+]=])
+  file(WRITE "${_work}/wrapper.c" [=[
+int __wrap_metis_test_missing(void) { return 37; }
+]=])
+
+  # CMake 3.24 stores try_compile results in the cache. Use a fresh private
+  # name and remove it afterwards without replacing any parent check result.
+  string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef _id)
+  set(_check "METIS_TEST_WRAP_${_id}")
+  while(DEFINED ${_check})
+    string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef _id)
+    set(_check "METIS_TEST_WRAP_${_id}")
+  endwhile()
+  try_compile(${_check} "${_work}/negative"
+    SOURCES "${_work}/caller.c" "${_work}/wrapper.c"
+    OUTPUT_VARIABLE _negative_output)
+  set(_negative "${${_check}}")
+  unset(${_check} CACHE)
+  try_compile(${_check} "${_work}/positive"
+    SOURCES "${_work}/caller.c" "${_work}/wrapper.c"
+    LINK_OPTIONS "LINKER:--wrap=metis_test_missing"
+    COPY_FILE "${_work}/probe${CMAKE_EXECUTABLE_SUFFIX}"
+    OUTPUT_VARIABLE _positive_output)
+  set(_positive "${${_check}}")
+  unset(${_check} CACHE)
+
+  file(WRITE "${_work}/link.log"
+    "Unwrapped:\n${_negative_output}\nWrapped:\n${_positive_output}")
+
+  set(_supported FALSE)
+  if(NOT _negative AND _positive)
+    if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+      set(_supported TRUE)
+      message(STATUS "METIS test wrapping: final link passed; runtime not run (no emulator)")
+    else()
+      set(_command "${_work}/probe${CMAKE_EXECUTABLE_SUFFIX}")
+      if(CMAKE_CROSSCOMPILING)
+        list(PREPEND _command ${CMAKE_CROSSCOMPILING_EMULATOR})
+      endif()
+      execute_process(
+        COMMAND ${_command}
+        RESULT_VARIABLE _run_result TIMEOUT 10)
+      if("${_run_result}" STREQUAL "0")
+        set(_supported TRUE)
+      endif()
+    endif()
+  endif()
+  set(${result} "${_supported}" PARENT_SCOPE)
+endfunction()
+
+
 function(metis_test_export_header)
   cmake_parse_arguments(PARSE_ARGV 0 _header "" "OUTPUT;SYMBOLS;SOURCE" "")
   if(NOT _header_OUTPUT OR NOT _header_SYMBOLS OR NOT _header_SOURCE)
@@ -171,7 +242,7 @@ endfunction()
 # run directly; cross targets use the configured emulator list or report an
 # explicit runtime skip after the normal build has already produced the target.
 function(metis_test_add_runtime)
-  cmake_parse_arguments(PARSE_ARGV 0 _test "" "NAME;TARGET;WORKING_DIRECTORY" "ARGS")
+  cmake_parse_arguments(PARSE_ARGV 0 _test "EXPECT_FAILURE" "NAME;TARGET;WORKING_DIRECTORY" "ARGS")
   if(NOT _test_NAME OR NOT _test_TARGET)
     message(FATAL_ERROR "metis_test_add_runtime requires NAME and TARGET")
   endif()
@@ -180,6 +251,7 @@ function(metis_test_add_runtime)
     COMMAND "${CMAKE_COMMAND}"
       "-DTEST_EXECUTABLE=$<TARGET_FILE:${_test_TARGET}>"
       "-DTEST_ARGUMENTS=${_test_ARGS}"
+      "-DTEST_EXPECT_FAILURE=${_test_EXPECT_FAILURE}"
       "-DTEST_WORKING_DIRECTORY=${_test_WORKING_DIRECTORY}"
       "-DTEST_CROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
       "-DTEST_EMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
@@ -210,6 +282,16 @@ if(DEFINED CMAKE_SCRIPT_MODE_FILE AND
   if(TEST_WORKING_DIRECTORY STREQUAL "")
     get_filename_component(TEST_WORKING_DIRECTORY "${TEST_EXECUTABLE}" DIRECTORY)
   endif()
+  set(_expected 0)
+  if(TEST_EXPECT_FAILURE)
+    execute_process(COMMAND ${_command} exit-status
+      WORKING_DIRECTORY "${TEST_WORKING_DIRECTORY}"
+      RESULT_VARIABLE _expected OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
+    if(NOT "${_expected}" MATCHES "^[1-9][0-9]*$" OR
+        NOT _stdout STREQUAL "" OR NOT _stderr STREQUAL "")
+      message(FATAL_ERROR "Failure-exit control did not return a silent failure status")
+    endif()
+  endif()
   execute_process(
     COMMAND ${_command} ${TEST_ARGUMENTS}
     WORKING_DIRECTORY "${TEST_WORKING_DIRECTORY}"
@@ -218,7 +300,8 @@ if(DEFINED CMAKE_SCRIPT_MODE_FILE AND
     ERROR_VARIABLE _stderr
     ECHO_OUTPUT_VARIABLE
     ECHO_ERROR_VARIABLE)
-  if(NOT _result EQUAL 0)
+  if(NOT "${_result}" STREQUAL "${_expected}" OR
+      (TEST_EXPECT_FAILURE AND (NOT _stdout STREQUAL "" OR NOT _stderr STREQUAL "")))
     message(FATAL_ERROR
       "Test executable failed (${_result})\n${_stdout}\n${_stderr}")
   endif()

@@ -25,13 +25,14 @@ static int CopyInputFilename(char *source, char **r_filename)
 
   *r_filename = NULL;
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
+    if (errno == 0)
+      errno = ENOMEM;
     return 0;
   }
   METIS_SIGCATCH(sigrval);
   if (sigrval == 0)
     *r_filename = gk_strdup(source);
-  gk_siguntrap();
+  metis_siguntrap();
 
   if (sigrval != 0) {
     if (errno == 0)
@@ -49,23 +50,26 @@ static int AllocateOrderVectors(idx_t count, idx_t **r_perm,
     idx_t **r_iperm)
 {
   volatile int sigrval=0;
+  int saved_errno;
 
   *r_perm = *r_iperm = NULL;
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
+    if (errno == 0)
+      errno = ENOMEM;
     return 0;
   }
   METIS_SIGCATCH(sigrval);
   if (sigrval == 0) {
     *r_perm  = imalloc(count, "main: perm");
-    *r_iperm = imalloc(count, "main: iperm");
+    if (*r_perm != NULL)
+      *r_iperm = imalloc(count, "main: iperm");
   }
-  gk_siguntrap();
+  metis_siguntrap();
 
   if (sigrval != 0 || *r_perm == NULL || *r_iperm == NULL) {
+    saved_errno = errno != 0 ? errno : ENOMEM;
     gk_free((void **)r_perm, r_iperm, LTERM);
-    if (errno == 0)
-      errno = ENOMEM;
+    errno = saved_errno;
     return 0;
   }
   return 1;
@@ -110,7 +114,7 @@ int main(int argc, char *argv[])
 
   /* Read the external iperm vector */
   if (!AllocateOrderVectors(graph->nvtxs, &perm, &iperm)) {
-    status = METIS_ERROR_MEMORY;
+    status = metis_errno_error();
     goto cleanup;
   }
   status = ReadPOVector(graph, argv[2], iperm);

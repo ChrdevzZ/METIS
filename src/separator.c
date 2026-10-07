@@ -65,7 +65,11 @@ void ConstructSeparator(ctrl_t *ctrl, graph_t *graph)
   ASSERT(CheckNodePartitionParams(graph));
 
   FM_2WayNodeRefine2Sided(ctrl, graph, 1); 
+  if (ctrl->status != METIS_OK)
+    return;
   FM_2WayNodeRefine1Sided(ctrl, graph, 4); 
+  if (ctrl->status != METIS_OK)
+    return;
 
   ASSERT(IsSeparable(graph));
 
@@ -98,11 +102,13 @@ void ConstructMinCoverSeparator(ctrl_t *ctrl, graph_t *graph)
   where  = graph->where;
 
   vmap  = iwspacemalloc(ctrl, nvtxs);
-  ivmap = iwspacemalloc(ctrl, nbnd);
-  cover = iwspacemalloc(ctrl, nbnd);
+  ivmap = vmap != NULL ? iwspacemalloc(ctrl, nbnd) : NULL;
+  cover = ivmap != NULL ? iwspacemalloc(ctrl, nbnd) : NULL;
   if (vmap == NULL || ivmap == NULL || cover == NULL) {
+    int cleanup_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -123,10 +129,12 @@ void ConstructMinCoverSeparator(ctrl_t *ctrl, graph_t *graph)
     bnvtxs[0] = 0;
 
     bxadj   = iwspacemalloc(ctrl, bnvtxs[2]+1);
-    badjncy = iwspacemalloc(ctrl, bnedges[0]+bnedges[1]+1);
+    badjncy = bxadj != NULL ? iwspacemalloc(ctrl, bnedges[0]+bnedges[1]+1) : NULL;
     if (bxadj == NULL || badjncy == NULL) {
+      int cleanup_errno = errno;
       ctrl->status = METIS_ERROR_MEMORY;
       WCOREPOP;
+      errno = cleanup_errno;
       return;
     }
 
@@ -167,8 +175,10 @@ void ConstructMinCoverSeparator(ctrl_t *ctrl, graph_t *graph)
     status = MinCover(bxadj, badjncy, bnvtxs[0], bnvtxs[1], cover,
         &csize);
     if (status != METIS_OK) {
+      int cleanup_errno = errno;
       ctrl->status = status;
       WCOREPOP;
+      errno = cleanup_errno;
       return;
     }
 
@@ -189,7 +199,9 @@ void ConstructMinCoverSeparator(ctrl_t *ctrl, graph_t *graph)
   icopy(nvtxs, graph->where, vmap);
 
   if (Allocate2WayNodePartitionMemory(ctrl, graph) != METIS_OK) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   if ((void *)graph->ckrinfo == (void *)graph->vkrinfo)
@@ -208,4 +220,3 @@ void ConstructMinCoverSeparator(ctrl_t *ctrl, graph_t *graph)
 
   ASSERT(IsSeparable(graph));
 }
-

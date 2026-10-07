@@ -179,8 +179,9 @@ consume compatible installed C interfaces when the remaining ABI and runtime
 contracts match; their libstdc++ and libc++ object interfaces do not cross that
 boundary. MINGW64 uses the different MSVCRT runtime.
 
-Shared GKlib and METIS applications using shared METIS require `/MD[d]` because
-CRT-owned objects/private allocations cross DLL boundaries. Fully static builds
+Shared GKlib requires `/MD[d]` for CRT-owned objects crossing its DLL boundary.
+Shared METIS application configurations retain that compatibility policy even
+when tools use the private static companion. Fully static builds
 and library-only shared METIS backed by static GKlib retain `/MT[d]` support;
 callers must release METIS-returned allocations with `METIS_Free`.
 See [platform contracts](docs/building.md#platforms-and-mixed-compilers).
@@ -277,6 +278,56 @@ Do not automatically restore intentionally removed build files.
   regression coverage for their build and consumer contracts.
 - Separate the introductory README, complete build reference and fixed-baseline
   fork comparison; preserve upstream ownership and license notices.
+
+- Fix inherited K-way initialization failures by checking the balance-vector
+  allocation and preserving recursive API error categories. Complete the fork's
+  control-status integration so failed initialization stops before workspace
+  reconstruction and refinement, without changing normal partition decisions.
+- Select constructor/statistics fault tests by demonstrated final-link wrapping
+  capability and static-library boundaries, rather than compiler brand. Extend
+  the existing fixture through the real public K-way call and recursive path;
+  IPO builds retain normal production tests and use a separate non-IPO source
+  producer for fault injection. Correct nested runtime and custom-configuration
+  fixture forwarding for multi-config generators.
+- Correct the fork's Windows shared METIS/static GKlib tool boundary with a
+  private static METIS companion. Tools and private fixtures share one GKlib
+  state; public API and export tests continue to use the canonical DLL.
+- Create the statistics failure fixture's POSIX capture stream exclusively
+  in its binary working directory so allocator and output assertions do not
+  depend on a global temporary directory.
+- Supply the POSIX build program explicitly to the Intel runtime developer
+  fixture while retaining its closed library-search environment.
+
+- Correct the fork integration of fallible POSIX frame setup: preserve
+  resource versus general errors and the first errno, leave unpublished frames
+  unpopped, and stop real queue and constructor consumers after failure.
+  Keep existing allocation-marker failure policies and finite output contracts.
+  Stop later bisection/refinement phases after a failed helper, and use ordinary
+  temporary pointers when handing volatile recovery owners to output APIs.
+- Preserve the first error through workspace, queue and recursive graph cleanup,
+  including heap-backed large-graph ordering. Stop statistics work at the first
+  failed allocation or volume calculation and retain resource/general error
+  classification. Extend the existing linked failure fixtures with cleanup
+  errno changes and independently registered frame-setup/query checks.
+- Preserve returned scratch-allocation errno through minimum-degree ordering,
+  one-sided helper refinement and boundary balancing cleanup. Stop their later
+  scratch allocations after the first failure.
+- Extend the existing workspace fixture across the real malloc/calloc boundary
+  of an installed IPO GKlib archive; keep the producer unchanged and verify
+  outer recovery state and a subsequent healthy replacement. Recheck wrapping
+  with changed active flags and ignore emulator settings in native probes.
+
+- Correct the fork integration of failed recovery-frame releases: check each
+  internal owner before leaving its activation and use a strict failure exit
+  when the binding cannot be released. Keep ordinary error classification and
+  the public same-activation retry contract. Extend linked subprocess tests
+  without changing production optimization policy.
+
+- Preserve the first errno and resource/general error category when CLI frame
+  establishment or graph/mesh construction fails. Check each private owner and
+  the real linked reader/constructor boundary without adding production hooks.
+- Stop ordering-vector allocation after the first failure and preserve its
+  errno through partial-result cleanup, including returning-error policies.
 
 These entries describe the current modified checkout, not a published fork
 release. Add actual release identifiers only after a release exists. Public

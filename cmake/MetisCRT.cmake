@@ -1,7 +1,7 @@
-# Applications use private METIS structures whose allocation/free operations
-# cross the DLL boundary. Shared GKlib also exposes CRT-owned FILE and signal
-# state. These paths require a shared CRT; the public METIS C API with static
-# GKlib remains usable in a library-only DLL with a static CRT.
+# Shared application configurations retain the DLL CRT requirement. Shared
+# GKlib also exposes CRT-owned FILE and signal state across DLL boundaries.
+# The public METIS C API with static GKlib remains usable in a library-only
+# DLL with a static CRT.
 include_guard(GLOBAL)
 
 
@@ -67,7 +67,7 @@ int main(void) { return 0; }" ${cache})
       check_c_source_compiles("int main(void) { return 0; }" ${sanity_cache})
       if(${sanity_cache})
         message(FATAL_ERROR
-          "${reason} requires the DLL CRT (/MD or /MDd) in configuration '${config}': CRT state and private allocations cross DLL boundaries. Use the DLL MSVC runtime, or use static METIS and GKlib for applications with /MT or /MTd. A library-only shared METIS with static GKlib can use a static CRT. See the shared CRT check in CMake's configure log.")
+          "${reason} requires the DLL CRT (/MD or /MDd) in configuration '${config}': this configuration retains the shared-runtime policy for compatibility with the private tool and GKlib interfaces. Use the DLL MSVC runtime, or use static METIS and GKlib for applications with /MT or /MTd. A library-only shared METIS with static GKlib can use a static CRT. See the shared CRT check in CMake's configure log.")
       else()
         message(FATAL_ERROR
           "Cannot validate the DLL CRT for ${reason} in configuration '${config}'. The compile-only probe failed before evaluating its _DLL requirement. See the shared CRT check in CMake's configure log.")

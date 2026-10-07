@@ -1,4 +1,6 @@
 # Dependency acquisition is confined to this directory.
+# Record only packages resolved here, not pre-existing parent targets.
+set(metis_gklib_package_dir "" PARENT_SCOPE)
 if(TARGET GKlib::GKlib)
   return()
 endif()
@@ -12,6 +14,9 @@ endif()
 if(NOT gklib_source AND NOT METIS_GKLIB_PROVIDER STREQUAL "SOURCE")
   # The library and applications consume this target from sibling directories.
   find_package(GKlib CONFIG QUIET GLOBAL)
+  if(TARGET GKlib::GKlib)
+    set(metis_gklib_package_dir "${GKlib_DIR}" PARENT_SCOPE)
+  endif()
 endif()
 
 if(TARGET GKlib::GKlib)
@@ -30,7 +35,7 @@ endif()
 if(NOT gklib_source AND METIS_FETCH_GKLIB)
   include(FetchContent)
   # Keep this pin equal to the gitlink; publish GKlib before publishing METIS.
-  set(METIS_GKLIB_REVISION 930c616e4453f6f2f0e95e13c1ac9f4b7355c4a3)
+  set(METIS_GKLIB_REVISION 33253c024713aa66ae14b8094c39e5743cd15f58)
   FetchContent_Declare(gklib
     GIT_REPOSITORY https://github.com/ChrdevzZ/GKlib.git
     GIT_TAG ${METIS_GKLIB_REVISION}

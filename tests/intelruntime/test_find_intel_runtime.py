@@ -94,6 +94,18 @@ class FindIntelRuntimeTests(unittest.TestCase):
             "-DCMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH=FALSE",
             "-DCMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH=FALSE",
         ]
+        if os.name != "nt":
+            program = shutil.which("ninja")
+            generator = "Ninja"
+            if program is None:
+                program = shutil.which("make")
+                generator = "Unix Makefiles"
+            if program is None:
+                self.fail("Intel runtime fixture requires ninja or make on POSIX")
+            args.extend([
+                "-G", generator,
+                "-DCMAKE_MAKE_PROGRAM:FILEPATH=" + str(Path(program).resolve()),
+            ])
         for key, value in definitions.items():
             args.append("-D{}={}".format(key, value))
         completed = subprocess.run(

@@ -28,6 +28,7 @@ int METIS_PartMeshNodal(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   int error, sigrval2;
   idx_t new_objval;
   idx_t *cleanup_npart;
+  idx_t *converted_xadj, *converted_adjncy;
   idx_t * volatile xadj=NULL;
   idx_t * volatile adjncy=NULL;
   idx_t * volatile new_npart=NULL;
@@ -58,9 +59,11 @@ int METIS_PartMeshNodal(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   }
 
   if (!gk_sigtrap()) {
+    int saved_errno=errno;
+    rstatus = metis_rcode(metis_sigtrap_error());
     gk_malloc_cleanup(0);
-    errno = ENOMEM;
-    return METIS_ERROR_MEMORY;
+    errno = saved_errno;
+    return rstatus;
   }
 
   METIS_SIGCATCH(sigrval);
@@ -77,14 +80,16 @@ int METIS_PartMeshNodal(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
 
   /* get the nodal graph */
   rstatus = METIS_MeshToNodal(ne, nn, eptr, eind, &pnumflag,
-      (idx_t **)&xadj, (idx_t **)&adjncy);
+      &converted_xadj, &converted_adjncy);
+  xadj = converted_xadj;
+  adjncy = converted_adjncy;
   if (rstatus != METIS_OK)
     goto SIGTHROW;
 
   new_npart = iMallocNoSignal((size_t)*nn, "METIS_PartMeshNodal: npart",
       &sigrval2);
   if (new_npart == NULL) {
-    rstatus = METIS_ERROR_MEMORY;
+    rstatus = sigrval2 == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
     goto SIGTHROW;
   }
 
@@ -134,7 +139,7 @@ SIGTHROW:
   METIS_Free((idx_t *)xadj);
   METIS_Free((idx_t *)adjncy);
 
-  gk_siguntrap();
+  metis_siguntrap();
   gk_malloc_cleanup(0);
 
   if (sigrval != 0 || rstatus != METIS_OK)
@@ -158,6 +163,7 @@ int METIS_PartMeshDual(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   int error, sigrval2;
   idx_t new_objval;
   idx_t *cleanup_epart;
+  idx_t *converted_xadj, *converted_adjncy;
   idx_t i, j;
   idx_t * volatile xadj=NULL;
   idx_t * volatile adjncy=NULL;
@@ -190,9 +196,11 @@ int METIS_PartMeshDual(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   }
 
   if (!gk_sigtrap()) {
+    int saved_errno=errno;
+    rstatus = metis_rcode(metis_sigtrap_error());
     gk_malloc_cleanup(0);
-    errno = ENOMEM;
-    return METIS_ERROR_MEMORY;
+    errno = saved_errno;
+    return rstatus;
   }
 
   METIS_SIGCATCH(sigrval);
@@ -209,14 +217,16 @@ int METIS_PartMeshDual(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
 
   /* get the dual graph */
   rstatus = METIS_MeshToDual(ne, nn, eptr, eind, ncommon, &pnumflag,
-      (idx_t **)&xadj, (idx_t **)&adjncy);
+      &converted_xadj, &converted_adjncy);
+  xadj = converted_xadj;
+  adjncy = converted_adjncy;
   if (rstatus != METIS_OK)
     goto SIGTHROW;
 
   new_epart = iMallocNoSignal((size_t)*ne, "METIS_PartMeshDual: epart",
       &sigrval2);
   if (new_epart == NULL) {
-    rstatus = METIS_ERROR_MEMORY;
+    rstatus = sigrval2 == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
     goto SIGTHROW;
   }
 
@@ -240,14 +250,14 @@ int METIS_PartMeshDual(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   nptr = iMallocNoSignal((size_t)*nn+1, "METIS_PartMeshDual: nptr",
       &sigrval2);
   if (nptr == NULL) {
-    rstatus = METIS_ERROR_MEMORY;
+    rstatus = sigrval2 == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
     goto SIGTHROW;
   }
   iset(*nn+1, 0, nptr);
   nind = iMallocNoSignal((size_t)eptr[*ne], "METIS_PartMeshDual: nind",
       &sigrval2);
   if (nind == NULL) {
-    rstatus = METIS_ERROR_MEMORY;
+    rstatus = sigrval2 == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
     goto SIGTHROW;
   }
 
@@ -296,7 +306,7 @@ SIGTHROW:
   METIS_Free((idx_t *)xadj);
   METIS_Free((idx_t *)adjncy);
 
-  gk_siguntrap();
+  metis_siguntrap();
   gk_malloc_cleanup(0);
 
   if (sigrval != 0 || rstatus != METIS_OK)
@@ -420,5 +430,5 @@ MEMORY_ERROR:
   error = errno == 0 ? ENOMEM : errno;
   gk_free((void **)&pwgts, &nbrdom, &nbrwgt, &nbrmrk, &itpwgts, LTERM);
   errno = error;
-  return METIS_ERROR_MEMORY;
+  return sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
 }

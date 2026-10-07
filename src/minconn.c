@@ -23,30 +23,32 @@ static int ResizeSubDomainArrays(idx_t **r_adids, idx_t **r_adwgts,
     idx_t ncopy, idx_t newsize, const char *message)
 {
   idx_t *new_adids, *new_adwgts;
-  int sigrval, saved_errno;
+  int sigrval, saved_errno, sigtrap_failed;
 
   new_adids = imalloc(newsize, message);
   if (new_adids == NULL)
-    return 0;
+    return METIS_ERROR_MEMORY;
   if (ncopy > 0)
     icopy(ncopy, *r_adids, new_adids);
 
   new_adwgts = iReallocNoSignal(*r_adwgts, (size_t)newsize,
-      message, &sigrval);
+      message, &sigrval, &sigtrap_failed);
   if (new_adwgts == NULL) {
     saved_errno = errno != 0 ? errno : ENOMEM;
     gk_free((void **)&new_adids, LTERM);
     errno = saved_errno;
     if (sigrval != 0)
-      gk_errexit(SIGMEM,
+      gk_errexit(sigtrap_failed ? sigrval : SIGMEM,
           "Failed to resize sparse-subdomain arrays");
-    return 0;
+    errno = saved_errno;
+    return sigtrap_failed && sigrval == SIGERR ?
+        METIS_ERROR : METIS_ERROR_MEMORY;
   }
 
   gk_free((void **)r_adids, LTERM);
   *r_adids = new_adids;
   *r_adwgts = new_adwgts;
-  return 1;
+  return METIS_OK;
 }
 
 
@@ -152,11 +154,16 @@ void ComputeSubDomainGraph(ctrl_t *ctrl, graph_t *graph)
       }
       newmax = 2*nads;
 
-      if (!ResizeSubDomainArrays(&ctrl->adids[pid], &ctrl->adwgts[pid],
-          0, newmax, "ComputeSubDomainGraph: adjacency arrays")) {
-        ctrl->status = METIS_ERROR_MEMORY;
-        WCOREPOP;
-        return;
+      {
+        int status = ResizeSubDomainArrays(&ctrl->adids[pid],
+            &ctrl->adwgts[pid], 0, newmax,
+            "ComputeSubDomainGraph: adjacency arrays");
+        if (status != METIS_OK) {
+          if (ctrl->status >= 0)
+            ctrl->status = status;
+          WCOREPOP;
+          return;
+        }
       }
       ctrl->maxnads[pid] = newmax;
     }
@@ -219,10 +226,15 @@ void UpdateEdgeSubDomainGraph(ctrl_t *ctrl, idx_t u, idx_t v, idx_t ewgt,
         }
         newmax = 2*(nads+1);
 
-        if (!ResizeSubDomainArrays(&ctrl->adids[u], &ctrl->adwgts[u],
-            nads, newmax, "UpdateEdgeSubDomainGraph: adjacency arrays")) {
-          ctrl->status = METIS_ERROR_MEMORY;
-          return;
+        {
+          int status = ResizeSubDomainArrays(&ctrl->adids[u],
+              &ctrl->adwgts[u], nads, newmax,
+              "UpdateEdgeSubDomainGraph: adjacency arrays");
+          if (status != METIS_OK) {
+            if (ctrl->status >= 0)
+              ctrl->status = status;
+            return;
+          }
         }
         ctrl->maxnads[u] = newmax;
       }
@@ -258,6 +270,7 @@ void UpdateEdgeSubDomainGraph(ctrl_t *ctrl, idx_t u, idx_t v, idx_t ewgt,
 /*************************************************************************/
 void EliminateSubDomainEdges(ctrl_t *ctrl, graph_t *graph)
 {
+  int saved_errno;
   idx_t i, ii, j, k, ncon, nparts, scheme, pid_from, pid_to, me, other, nvtxs, 
         total, max, avg, totalout, nind=0, ncand=0, ncand2, target, target2, 
         nadd, bestnadd=0;
@@ -336,6 +349,8 @@ void EliminateSubDomainEdges(ctrl_t *ctrl, graph_t *graph)
   }
 
   ipqInit(&queue, nparts);
+  if (queue.heap == NULL || queue.locator == NULL)
+    goto ERROR_QUEUE;
 
   /* Get into the loop eliminating subdomain connections */
   while (1) {
@@ -552,11 +567,15 @@ void EliminateSubDomainEdges(ctrl_t *ctrl, graph_t *graph)
   return;
 
 ERROR_QUEUE:
+  saved_errno = errno;
   ipqFree(&queue);
+  errno = saved_errno;
 ERROR:
+  saved_errno = errno;
   if (ctrl->status == METIS_OK)
-    ctrl->status = METIS_ERROR_MEMORY;
+    ctrl->status = metis_errno_error();
   WCOREPOP;
+  errno = saved_errno;
 }
 
 
@@ -780,8 +799,18 @@ void MoveGroupMinConnForVol(ctrl_t *ctrl, graph_t *graph, idx_t to, idx_t nind,
   /* Note: a ComputeCut()==mincut check is not valid here: for objtype=vol the
      edge weights are set to 1+vsize[u]+vsize[v], so ComputeCut() returns the
      vsize-weighted cut while graph->mincut tracks the unweighted edge count. */
-  ASSERTP(ComputeVolume(graph, where) == graph->minvol,
-      ("%"PRIDX" %"PRIDX"\n", ComputeVolume(graph, where), graph->minvol));
+#if GKLIB_ASSERTIONS_ENABLED
+  {
+    idx_t volume = ComputeVolume(graph, where);
+    if (volume < 0) {
+      if (ctrl->status == METIS_OK)
+        ctrl->status = metis_errno_error();
+      return;
+    }
+    ASSERTP(volume == graph->minvol,
+        ("%"PRIDX" %"PRIDX"\n", volume, graph->minvol));
+  }
+#endif
 
 }
 

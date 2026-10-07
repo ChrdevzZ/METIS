@@ -19,6 +19,9 @@ tool regressions. Run the upstream mapping audit explicitly when changing
 source provenance; it is not a prerequisite for building or testing a source
 archive, which may not contain the recorded Git objects.
 
+Nested runtime fixtures pass the selected configuration to both the child
+configuration list and CTest, including custom multi-config configurations.
+
 ```sh
 python tools/upstream.py check
 git diff --check
@@ -57,6 +60,21 @@ The API fixture also enables the private block-partitioning debug path on a
 low-degree graph and verifies that multi-constraint input continues through
 the supported partitioner.
 
+`metis.release-failure.*` additionally forces a failed release at the real
+outer Kway recovery boundary in both error policies. Its subprocess must exit
+with `EXIT_FAILURE` without running host signal or exit callbacks. IPO tests
+retain the production policy and use the existing separate wrapping producer.
+An internal recovery-frame release failure terminates through `_Exit` rather
+than abandoning a live jump binding; ordinary recoverable errors still return
+their original METIS status.
+
+`metis.cli-frame-failure.*` compiles one parameterized fixture with each CLI
+owner to check failed frame establishment without production failpoints. These
+source-inclusion cases preserve errno, outputs and existing buffer ownership.
+`metis.cli-linked-frame-failure` reuses constructor link wrapping across the
+real CLI and graph/mesh constructors. POSIX mask-query injection still requires
+an actual POSIX producer; the portable fixture does not establish that evidence.
+
 Allocation-failure fixtures exercise control/graph/workspace construction,
 neighbor-pool exhaustion, derived size overflow, both numbering modes and
 caller-owned graph/mesh outputs. Each covered public failure must return the
@@ -71,11 +89,63 @@ on failure.
 Minimum-cover failure injection covers every matching and
 decomposition allocation and requires the caller's cover to remain unchanged.
 Application fault injection checks that connectivity and post-partition
-statistics return an allocation error after releasing every partially
-allocated work array. A failed statistics report must produce no partial
+statistics return the original resource or general error after releasing every
+partially allocated work array. Allocation stops at the first failed work
+array. A failed statistics report must produce no partial
 success output; reporting begins only after every fallible calculation and
 allocation succeeds. Empty induced vertex sets must return zero components
 without indexing beyond the graph.
+
+Constructor and statistics link wrapping requires static METIS and static
+GKlib. A separate-translation-unit probe must fail its unwrapped final link,
+succeed with wrapping, and return the expected value when native execution or
+an emulator is available. Compiler names alone do not enable these tests;
+shared-library internal calls are outside this wrapping boundary. With IPO on
+source-built static libraries, these two fixtures build the same sources in a
+separate non-IPO producer; normal API/CLI tests still use the production IPO
+targets. This does not demonstrate injection into an IPO archive.
+With an installed GKlib package, only METIS is rebuilt without IPO; GKlib's
+binary is unchanged and the fixture must still prove its injection points.
+Workspace-constructor injection wraps real malloc/calloc only while the real
+mcore constructor is active, including IPO's zero-fill transformation. The
+fixture clears that context after a synchronous jump, checks both error modes,
+and retains a live outer marker, frame, entry mask and subsequent replacement.
+An imported target without a reloadable package retains direct assertions.
+The K-way constructor fixture checks cut and volume initialization failures in
+returning and synchronous-recovery modes, preserves recursive error categories, requires
+later allocation phases to stop, restores one-based input and verifies a
+subsequent successful public call. Graph partition outputs after an internal
+algorithm failure are not given a new transactional guarantee.
+On POSIX static builds, the same fixture wraps only real `pthread_sigmask`
+queries, calibrates the observed depths on fixed API inputs, and checks
+resource/general classification, errno, depth, complete masks, tracker markers,
+input numbering and a subsequent healthy call. Debug volume diagnostics and
+assertion-only consumers retain their existing enabled conditions.
+The query cases also reject allocations after the first failure; recovery
+owners are passed through ordinary temporary pointers without volatile casts.
+Paired subdomain growth and optional coarse-graph shrink have separate query
+cases; ordinary allocation and cross-marker failure policies remain covered.
+
+Run `metis.frame-setup-cleanup` separately to check returned frame-setup errors
+through the real graph, mesh and ordering APIs, including the retained
+ParMETIS helper entry points without requiring MPI. Its controlled wrapper
+also makes successful frees change errno, so cleanup must preserve the first
+error. Bounded large-graph NodeND cases use real heap-backed mcore scratch to
+exercise multi-separator cleanup. These cases do not replace POSIX producer
+tests. On supported POSIX static builds, `metis.posix-query-failure` runs the
+actual mask-query and resize cases independently of allocator injection.
+Both paths require a healthy calibration with nonzero injection opportunities.
+
+On Windows, shared METIS with static GKlib builds a private static METIS
+companion for tools and private-interface fixtures. These clients share one
+GKlib recovery and allocation instance. The companion uses the same sources,
+configuration and target policies, is not installed, and adds a second METIS
+compilation. Public API, Fortran symbol and DLL export tests still link the
+canonical shared library.
+
+Nested runtime fixtures forward the active multi-config configuration. Custom
+link-probe configurations are selected after compiler identification so the
+bootstrap check can use a supported configuration.
 
 Enable `GKLIB_BUILD_TESTING=ON` when a source-provider METIS build should also
 register GKlib's deterministic allocation-failure checks. They require mcore
@@ -94,6 +164,12 @@ allocated, before reading its uninitialized permutation. Minimum degree
 ordering checks its derived workspace length before changing graph numbering;
 the public failure fixture verifies the error status, output preservation and
 restoration of one-based input.
+Returning scratch failures in ordering, edge/node refinement, initial
+bisection, separator and k-way cleanup stop later scratch allocation and
+preserve errno through real queue and heap releases. Selected real graph
+constructors exercise multiple allocation groups, including contiguous and
+volume working arrays. These bounded returning-error checks do not claim
+exhaustive coverage of every algorithm allocation.
 
 The Python developer checks also exercise runtime copying, unchanged-file
 timestamps, missing and empty inputs, and bounded recovery from a transient
@@ -107,9 +183,10 @@ can be compatible when architecture, C ABI, UCRT ownership and external
 runtimes match; their libstdc++ and libc++ object interfaces do not interchange.
 
 Matching `/MT` flags do not make CRT-owned objects portable between DLLs.
-Shared GKlib exposes `FILE*` and signal state, and METIS programs exchange
-private allocations with shared METIS. These paths require `/MD[d]`; the CMake
-CRT fixtures cover valid and rejected policies without executing target code.
+Shared GKlib exposes `FILE*` and signal state across its DLL boundary. Shared
+METIS application configurations retain `/MD[d]` as a compatibility policy,
+including when tools use the private static companion. The CMake CRT fixtures
+cover valid and rejected policies without executing target code.
 Static libraries retain `/MT[d]` support. Library-only shared METIS with static
 GKlib retains its public C API under `/MT[d]`, with library-owned deallocation.
 See Microsoft's explanation of

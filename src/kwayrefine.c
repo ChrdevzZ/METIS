@@ -16,6 +16,7 @@
 /*************************************************************************/
 int RefineKWay(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph)
 {
+  int saved_errno;
   idx_t i, ncmps, nlevels, contig=ctrl->contig;
   graph_t *ptr;
 
@@ -146,16 +147,26 @@ int RefineKWay(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph)
       goto ERROR;
   }
 
-  if (ctrl->contig) 
-    ASSERT(FindPartitionInducedComponents(graph, graph->where, NULL, NULL) == ctrl->nparts);
+#if GKLIB_ASSERTIONS_ENABLED
+  if (ctrl->contig) {
+    ncmps = FindPartitionInducedComponents(graph, graph->where, NULL, NULL);
+    if (ncmps < 0)
+      goto ERROR;
+    ASSERT(ncmps == ctrl->nparts);
+  }
+#endif
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->UncoarsenTmr));
   return METIS_OK;
 
 ERROR:
+  saved_errno = errno;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = metis_errno_error();
   ctrl->contig = contig;
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->UncoarsenTmr));
-  return ctrl->status == METIS_OK ? METIS_ERROR_MEMORY : ctrl->status;
+  errno = saved_errno;
+  return ctrl->status;
 }
 
 
@@ -210,8 +221,9 @@ int AllocateKWayPartitionMemory(ctrl_t *ctrl, graph_t *graph)
   }
 
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
-    goto MEMORY_ERROR;
+    if (ctrl->status >= 0)
+      ctrl->status = metis_rcode(metis_sigtrap_error());
+    return ctrl->status;
   }
   METIS_SIGCATCH(sigrval);
   if (sigrval != 0)
@@ -233,7 +245,7 @@ int AllocateKWayPartitionMemory(ctrl_t *ctrl, graph_t *graph)
   if (ckrinfo == NULL && vkrinfo == NULL)
     goto ALLOCATION_ERROR;
 
-  gk_siguntrap();
+  metis_siguntrap();
   if ((void *)graph->ckrinfo == (void *)graph->vkrinfo)
     graph->ckrinfo = NULL;
   gk_free((void **)&graph->pwgts, &graph->where, &graph->bndptr,
@@ -257,14 +269,15 @@ ALLOCATION_ERROR:
   cleanup_vkrinfo = (vkrinfo_t *)vkrinfo;
   gk_free((void **)&cleanup_pwgts, &cleanup_where, &cleanup_bndptr,
       &cleanup_bndind, &cleanup_ckrinfo, &cleanup_vkrinfo, LTERM);
-  gk_siguntrap();
+  metis_siguntrap();
   errno = saved_errno;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  if (ctrl->status >= 0)
+    ctrl->status = sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
   if (errno == 0)
-    errno = ENOMEM;
-  return METIS_ERROR_MEMORY;
+    errno = sigrval == SIGERR ? EINVAL : ENOMEM;
+  return ctrl->status;
 }
 
 
@@ -428,7 +441,17 @@ int ComputeKWayPartitionParams(ctrl_t *ctrl, graph_t *graph)
       
         ComputeKWayVolGains(ctrl, graph);
       }
-      ASSERT(graph->minvol == ComputeVolume(graph, graph->where));
+#if GKLIB_ASSERTIONS_ENABLED
+      {
+        idx_t volume = ComputeVolume(graph, graph->where);
+        if (volume < 0) {
+          if (ctrl->status == METIS_OK)
+            ctrl->status = metis_errno_error();
+          return ctrl->status;
+        }
+        ASSERT(graph->minvol == volume);
+      }
+#endif
       break;
     default:
       gk_errexit(SIGERR, "Unknown objtype of %d\n", ctrl->objtype);
@@ -444,6 +467,7 @@ int ComputeKWayPartitionParams(ctrl_t *ctrl, graph_t *graph)
 /*************************************************************************/
 int ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph)
 {
+  int saved_errno;
   idx_t i, j, k, nvtxs, nbnd, nparts, me, other, istart, iend, tid, ted;
   idx_t *xadj, *adjncy, *adjwgt;
   idx_t *cmap, *where, *bndptr, *bndind, *cwhere, *htable;
@@ -464,7 +488,12 @@ int ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph)
     ASSERT(CheckBnd2(cgraph));
   }
   else {
-    ASSERT(cgraph->minvol == ComputeVolume(cgraph, cgraph->where));
+#if GKLIB_ASSERTIONS_ENABLED
+    idx_t volume = ComputeVolume(cgraph, cgraph->where);
+    if (volume < 0)
+      goto ERROR;
+    ASSERT(cgraph->minvol == volume);
+#endif
   }
 
   nvtxs   = graph->nvtxs;
@@ -631,7 +660,14 @@ int ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph)
       
         ComputeKWayVolGains(ctrl, graph);
 
-        ASSERT(graph->minvol == ComputeVolume(graph, graph->where));
+#if GKLIB_ASSERTIONS_ENABLED
+        {
+          idx_t volume = ComputeVolume(graph, graph->where);
+          if (volume < 0)
+            goto ERROR;
+          ASSERT(graph->minvol == volume);
+        }
+#endif
       }
       break;
 
@@ -648,9 +684,11 @@ int ProjectKWayPartition(ctrl_t *ctrl, graph_t *graph)
   return METIS_OK;
 
 ERROR:
+  saved_errno = errno;
   if (ctrl->status == METIS_OK)
-    ctrl->status = METIS_ERROR_MEMORY;
+    ctrl->status = metis_errno_error();
   WCOREPOP;
+  errno = saved_errno;
   return ctrl->status;
 }
 

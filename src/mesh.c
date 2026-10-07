@@ -106,9 +106,11 @@ int METIS_MeshToDual(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   }
 
   if (!gk_sigtrap()) {
+    int saved_errno=errno;
+    rstatus = metis_rcode(metis_sigtrap_error());
     gk_malloc_cleanup(0);
-    errno = ENOMEM;
-    return METIS_ERROR_MEMORY;
+    errno = saved_errno;
+    return rstatus;
   }
 
   METIS_SIGCATCH(sigrval);
@@ -139,7 +141,7 @@ SIGTHROW:
   if (renumber)
     ChangeMesh2FNumbering(*ne, eptr, eind, *ne, *r_xadj, *r_adjncy);
 
-  gk_siguntrap();
+  metis_siguntrap();
   gk_malloc_cleanup(0);
 
   if (sigrval != 0 || rstatus != METIS_OK) {
@@ -213,9 +215,11 @@ int METIS_MeshToNodal(idx_t *ne, idx_t *nn, idx_t *eptr, idx_t *eind,
   }
 
   if (!gk_sigtrap()) {
+    int saved_errno=errno;
+    rstatus = metis_rcode(metis_sigtrap_error());
     gk_malloc_cleanup(0);
-    errno = ENOMEM;
-    return METIS_ERROR_MEMORY;
+    errno = saved_errno;
+    return rstatus;
   }
 
   METIS_SIGCATCH(sigrval);
@@ -245,7 +249,7 @@ SIGTHROW:
   if (renumber)
     ChangeMesh2FNumbering(*ne, eptr, eind, *nn, *r_xadj, *r_adjncy);
 
-  gk_siguntrap();
+  metis_siguntrap();
   gk_malloc_cleanup(0);
 
   if (sigrval != 0 || rstatus != METIS_OK) {
@@ -358,7 +362,7 @@ MEMORY_ERROR:
   free(adjncy);
   gk_free((void **)&nptr, &nind, &marker, &nbrs, LTERM);
   errno = error;
-  return METIS_ERROR_MEMORY;
+  return sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
 }
 
 
@@ -496,7 +500,7 @@ MEMORY_ERROR:
   free(adjncy);
   gk_free((void **)&nptr, &nind, &marker, &nbrs, LTERM);
   errno = error;
-  return METIS_ERROR_MEMORY;
+  return sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
 }
 
 

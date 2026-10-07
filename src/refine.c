@@ -16,6 +16,7 @@
 /*************************************************************************/
 void Refine2Way(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph, real_t *tpwgts)
 {
+  int saved_errno;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->UncoarsenTmr));
 
@@ -28,8 +29,12 @@ void Refine2Way(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph, real_t *tpwgts)
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->RefTmr));
 
     Balance2Way(ctrl, graph, tpwgts);
+    if (ctrl->status != METIS_OK)
+      goto REFINEMENT_ERROR;
 
     FM_2WayRefine(ctrl, graph, tpwgts, ctrl->niter); 
+    if (ctrl->status != METIS_OK)
+      goto REFINEMENT_ERROR;
 
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->RefTmr));
 
@@ -41,12 +46,25 @@ void Refine2Way(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph, real_t *tpwgts)
 
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->ProjectTmr));
     Project2WayPartition(ctrl, graph);
+    saved_errno = errno;
     IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->ProjectTmr));
-    if (ctrl->status != METIS_OK)
+    if (ctrl->status != METIS_OK) {
+      errno = saved_errno;
       break;
+    }
   }
 
+  saved_errno = errno;
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->UncoarsenTmr));
+  if (ctrl->status != METIS_OK)
+    errno = saved_errno;
+  return;
+
+REFINEMENT_ERROR:
+  saved_errno = errno;
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->RefTmr));
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->UncoarsenTmr));
+  errno = saved_errno;
 }
 
 
@@ -62,6 +80,7 @@ int Allocate2WayPartitionMemory(ctrl_t *ctrl, graph_t *graph)
   idx_t * volatile bndptr=NULL, * volatile bndind=NULL;
   idx_t * volatile id=NULL, * volatile ed=NULL;
   idx_t nvtxs, ncon;
+  int saved_errno;
 
   if (ctrl == NULL || graph == NULL) {
     errno = EINVAL;
@@ -86,8 +105,9 @@ int Allocate2WayPartitionMemory(ctrl_t *ctrl, graph_t *graph)
   }
 
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
-    goto MEMORY_ERROR;
+    if (ctrl->status >= 0)
+      ctrl->status = metis_rcode(metis_sigtrap_error());
+    return ctrl->status;
   }
   METIS_SIGCATCH(sigrval);
   if (sigrval != 0)
@@ -103,7 +123,7 @@ int Allocate2WayPartitionMemory(ctrl_t *ctrl, graph_t *graph)
       id == NULL || ed == NULL)
     goto ALLOCATION_ERROR;
 
-  gk_siguntrap();
+  metis_siguntrap();
   gk_free((void **)&graph->pwgts, &graph->where, &graph->bndptr,
       &graph->bndind, &graph->id, &graph->ed, LTERM);
   graph->pwgts  = (idx_t *)pwgts;
@@ -115,6 +135,7 @@ int Allocate2WayPartitionMemory(ctrl_t *ctrl, graph_t *graph)
   return METIS_OK;
 
 ALLOCATION_ERROR:
+  saved_errno = errno;
   cleanup_pwgts = (idx_t *)pwgts;
   cleanup_where = (idx_t *)where;
   cleanup_bndptr = (idx_t *)bndptr;
@@ -123,13 +144,15 @@ ALLOCATION_ERROR:
   cleanup_ed = (idx_t *)ed;
   gk_free((void **)&cleanup_pwgts, &cleanup_where, &cleanup_bndptr,
       &cleanup_bndind, &cleanup_id, &cleanup_ed, LTERM);
-  gk_siguntrap();
+  metis_siguntrap();
+  errno = saved_errno;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  if (ctrl->status >= 0)
+    ctrl->status = sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
   if (errno == 0)
-    errno = ENOMEM;
-  return METIS_ERROR_MEMORY;
+    errno = sigrval == SIGERR ? EINVAL : ENOMEM;
+  return ctrl->status;
 }
 
 
@@ -280,4 +303,3 @@ void Project2WayPartition(ctrl_t *ctrl, graph_t *graph)
   FreeGraph(&graph->coarser);
   graph->coarser = NULL;
 }
-

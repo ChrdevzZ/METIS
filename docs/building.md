@@ -217,6 +217,12 @@ Install directories follow GNUInstallDirs; Windows DLLs go into the binary
 directory. Only public headers are installed. Exported targets carry include
 paths and link dependencies and remain relocatable with the install prefix.
 
+On Windows, the shared METIS/static GKlib combination builds tools against a
+private static METIS companion so their private calls share one GKlib recovery
+and allocation instance. This adds a second METIS compilation and embeds METIS
+in those executables. The companion is not installed or exported; public
+consumers still use `METIS::metis` and its DLL.
+
 ```cmake
 find_package(METIS 5 CONFIG REQUIRED)
 target_link_libraries(my_application PRIVATE METIS::metis)
@@ -276,9 +282,9 @@ separate prefixes.
 
 Windows DLL boundaries also constrain CRT-owned objects. Shared GKlib requires
 `/MD` or `/MDd`: its `FILE*` and signal interfaces cannot safely cross separate
-static CRT instances. METIS applications likewise require the DLL CRT when
-using shared METIS or GKlib, because private graph allocations cross that
-boundary. These configurations are checked before building. `/MT` and `/MTd`
+static CRT instances. METIS application configurations using shared METIS
+retain the DLL CRT compatibility policy, including tools linked to the private
+static companion. These configurations are checked before building. `/MT` and `/MTd`
 remain supported for static libraries and applications. A library-only shared
 METIS with static GKlib can use a static CRT; callers must use `METIS_Free` for
 memory returned by METIS and must not use its private application interfaces.

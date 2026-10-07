@@ -166,8 +166,9 @@ static int AppendOutputSuffix(const char *filename, const char *suffix,
   }
 
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
-    return METIS_ERROR_MEMORY;
+    if (errno == 0)
+      errno = ENOMEM;
+    return metis_errno_error();
   }
   METIS_SIGCATCH(sigrval);
   if (sigrval == 0) {
@@ -181,7 +182,7 @@ static int AppendOutputSuffix(const char *filename, const char *suffix,
 #endif
       result = gk_malloc(filename_length+suffix_length+1, "output filename");
   }
-  gk_siguntrap();
+  metis_siguntrap();
 
   if (sigrval != 0 || result == NULL) {
     if (errno == 0)
@@ -1012,7 +1013,8 @@ static int AllocateGraphInput(graph_t *graph, idx_t ncon, idx_t readew)
   volatile int sigrval=0;
 
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
+    if (errno == 0)
+      errno = ENOMEM;
     return 0;
   }
   METIS_SIGCATCH(sigrval);
@@ -1025,7 +1027,7 @@ static int AllocateGraphInput(graph_t *graph, idx_t ncon, idx_t readew)
         imalloc(graph->nedges, "ReadGraph: adjwgt") : NULL;
     graph->vsize = ismalloc(graph->nvtxs, 1, "ReadGraph: vsize");
   }
-  gk_siguntrap();
+  metis_siguntrap();
 
   if (sigrval != 0) {
     if (errno == 0)
@@ -1047,7 +1049,8 @@ static int AllocateMeshInput(mesh_t *mesh, idx_t ncon, size_t eindcap)
   volatile int sigrval=0;
 
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
+    if (errno == 0)
+      errno = ENOMEM;
     return 0;
   }
   METIS_SIGCATCH(sigrval);
@@ -1057,7 +1060,7 @@ static int AllocateMeshInput(mesh_t *mesh, idx_t ncon, size_t eindcap)
     mesh->ewgt = ismalloc((ncon == 0 ? 1 : ncon)*mesh->ne, 1,
         "ReadMesh: ewgt");
   }
-  gk_siguntrap();
+  metis_siguntrap();
 
   if (sigrval != 0) {
     if (errno == 0)
@@ -1079,13 +1082,14 @@ static int GrowMeshInput(mesh_t *mesh, size_t newcap)
   idx_t * volatile new_eind=NULL;
 
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
+    if (errno == 0)
+      errno = ENOMEM;
     return 0;
   }
   METIS_SIGCATCH(sigrval);
   if (sigrval == 0)
     new_eind = irealloc(mesh->eind, newcap, "ReadMesh: eind");
-  gk_siguntrap();
+  metis_siguntrap();
 
   if (sigrval != 0) {
     if (errno == 0)
@@ -1127,7 +1131,7 @@ int ReadGraph(params_t *params, graph_t **r_graph)
 
   graph = CreateGraph();
   if (graph == NULL)
-    return METIS_ERROR_MEMORY;
+    return metis_errno_error();
 
   fpin = fopen(params->filename, "r");
   if (fpin == NULL)
@@ -1291,12 +1295,13 @@ read_failure:
 
 allocation_failure:
   saved_errno = errno != 0 ? errno : ENOMEM;
+  status = metis_errno_error();
   if (fpin != NULL)
     fclose(fpin);
   free(line);
   FreeGraph(&graph);
-  return ReportError(METIS_ERROR_MEMORY, saved_errno,
-      "Memory allocation failed while reading %s.\n", params->filename);
+  return ReportError(status, saved_errno,
+      "Failed to prepare input while reading %s.\n", params->filename);
 }
 
 
@@ -1328,7 +1333,7 @@ int ReadMesh(params_t *params, mesh_t **r_mesh)
 
   mesh = CreateMesh();
   if (mesh == NULL)
-    return METIS_ERROR_MEMORY;
+    return metis_errno_error();
 
   fpin = fopen(params->filename, "r");
   if (fpin == NULL)
@@ -1473,12 +1478,13 @@ read_failure:
 
 allocation_failure:
   saved_errno = errno != 0 ? errno : ENOMEM;
+  status = metis_errno_error();
   if (fpin != NULL)
     fclose(fpin);
   free(line);
   FreeMesh(&mesh);
-  return ReportError(METIS_ERROR_MEMORY, saved_errno,
-      "Memory allocation failed while reading %s.\n", params->filename);
+  return ReportError(status, saved_errno,
+      "Failed to prepare input while reading %s.\n", params->filename);
 }
 
 
@@ -1502,13 +1508,14 @@ static int AllocateTPwgts(idx_t count, real_t **r_tpwgts)
 
   *r_tpwgts = NULL;
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
+    if (errno == 0)
+      errno = ENOMEM;
     return 0;
   }
   METIS_SIGCATCH(sigrval);
   if (sigrval == 0)
     *r_tpwgts = rsmalloc(count, -1.0, "ReadTPwgts: tpwgts");
-  gk_siguntrap();
+  metis_siguntrap();
 
   if (sigrval != 0) {
     if (errno == 0)
@@ -1782,12 +1789,13 @@ read_failure:
 
 allocation_failure:
   saved_errno = errno != 0 ? errno : ENOMEM;
+  status = metis_errno_error();
   if (fpin != NULL)
     fclose(fpin);
   free(line);
   gk_free((void **)&tpwgts, LTERM);
-  return ReportError(METIS_ERROR_MEMORY, saved_errno,
-      "Memory allocation failed while reading target weights.\n");
+  return ReportError(status, saved_errno,
+      "Failed to prepare input while reading target weights.\n");
 }
 
 
@@ -1801,7 +1809,8 @@ static int AllocatePOVectors(idx_t count, idx_t **r_seen, idx_t **r_values)
   *r_seen = NULL;
   *r_values = NULL;
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
+    if (errno == 0)
+      errno = ENOMEM;
     return 0;
   }
   METIS_SIGCATCH(sigrval);
@@ -1809,7 +1818,7 @@ static int AllocatePOVectors(idx_t count, idx_t **r_seen, idx_t **r_values)
     *r_seen = ismalloc(count, 0, "ReadPOVector: seen");
     *r_values = imalloc(count, "ReadPOVector: values");
   }
-  gk_siguntrap();
+  metis_siguntrap();
 
   if (sigrval != 0) {
     if (errno == 0)
@@ -1895,12 +1904,13 @@ read_failure:
 
 allocation_failure:
   saved_errno = errno != 0 ? errno : ENOMEM;
+  status = metis_errno_error();
   if (fpin != NULL)
     fclose(fpin);
   free(line);
   gk_free((void **)&seen, &values, LTERM);
-  return ReportError(METIS_ERROR_MEMORY, saved_errno,
-      "Memory allocation failed while reading %s.\n",
+  return ReportError(status, saved_errno,
+      "Failed to prepare input while reading %s.\n",
       filename != NULL ? filename : "(null)");
 }
 

@@ -75,20 +75,30 @@ void FM_2WayNodeRefine2Sided(ctrl_t *ctrl, graph_t *graph, idx_t niter)
   mindsize = 2*(size_t)nvtxs;
 
   queues[0] = rpqCreate(nvtxs);
-  queues[1] = rpqCreate(nvtxs);
+  queues[1] = queues[0] != NULL ? rpqCreate(nvtxs) : NULL;
+  if (queues[0] == NULL || queues[1] == NULL) {
+    int saved_errno = errno;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
+    if (queues[0] != NULL)
+      rpqDestroy(queues[0]);
+    WCOREPOP;
+    errno = saved_errno;
+    return;
+  }
 
-  moved = iwspacemalloc(ctrl, nvtxs);
-  swaps = iwspacemalloc(ctrl, nvtxs);
-  mptr  = iwspacemalloc(ctrl, nvtxs+1);
-  mind  = (idx_t *)wspacemalloc(ctrl, mindsize*sizeof(idx_t));
-  if (queues[0] == NULL || queues[1] == NULL || moved == NULL ||
-      swaps == NULL || mptr == NULL || mind == NULL) {
+  if ((moved = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (swaps = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (mptr = iwspacemalloc(ctrl, nvtxs+1)) == NULL ||
+      (mind = (idx_t *)wspacemalloc(ctrl, mindsize*sizeof(idx_t))) == NULL) {
+    int saved_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     if (queues[0] != NULL)
       rpqDestroy(queues[0]);
     if (queues[1] != NULL)
       rpqDestroy(queues[1]);
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -353,15 +363,22 @@ void FM_2WayNodeRefine1Sided(ctrl_t *ctrl, graph_t *graph, idx_t niter)
   mindsize = 2*(size_t)nvtxs;
 
   queue = rpqCreate(nvtxs);
+  if (queue == NULL) {
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
+    WCOREPOP;
+    return;
+  }
 
-  swaps = iwspacemalloc(ctrl, nvtxs);
-  mptr  = iwspacemalloc(ctrl, nvtxs+1);
-  mind  = (idx_t *)wspacemalloc(ctrl, mindsize*sizeof(idx_t));
-  if (queue == NULL || swaps == NULL || mptr == NULL || mind == NULL) {
+  if ((swaps = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (mptr = iwspacemalloc(ctrl, nvtxs+1)) == NULL ||
+      (mind = (idx_t *)wspacemalloc(ctrl, mindsize*sizeof(idx_t))) == NULL) {
+    int saved_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     if (queue != NULL)
       rpqDestroy(queue);
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -586,14 +603,21 @@ void FM_2WayNodeBalance(ctrl_t *ctrl, graph_t *graph)
   other = (to+1)%2;
 
   queue = rpqCreate(nvtxs);
+  if (queue == NULL) {
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
+    WCOREPOP;
+    return;
+  }
 
-  perm  = iwspacemalloc(ctrl, nvtxs);
-  moved = iwspacemalloc(ctrl, nvtxs);
-  if (queue == NULL || perm == NULL || moved == NULL) {
+  if ((perm = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (moved = iwspacemalloc(ctrl, nvtxs)) == NULL) {
+    int saved_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     if (queue != NULL)
       rpqDestroy(queue);
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
   iset(nvtxs, -1, moved);

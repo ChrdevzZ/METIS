@@ -36,7 +36,7 @@ idx_t FindPartitionInducedComponents(graph_t *graph, idx_t *where,
   idx_t *xadj, *adjncy;
   idx_t *touched=NULL, *perm=NULL, *todo=NULL;
   idx_t mustfree_ccsr=0, mustfree_where=0;
-  int sigrval;
+  int sigrval, saved_errno;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -44,12 +44,15 @@ idx_t FindPartitionInducedComponents(graph_t *graph, idx_t *where,
 
   /* Deal with NULL supplied cptr/cind vectors */
   if (cptr == NULL) {
+    mustfree_ccsr = 1;
+    cind = NULL;
     cptr = iMallocNoSignal((size_t)nvtxs+1,
         "FindPartitionInducedComponents: cptr", &sigrval);
+    if (cptr == NULL)
+      goto MEMORY_ERROR;
     cind = iMallocNoSignal((size_t)nvtxs,
         "FindPartitionInducedComponents: cind", &sigrval);
-    mustfree_ccsr = 1;
-    if (cptr == NULL || cind == NULL)
+    if (cind == NULL)
       goto MEMORY_ERROR;
   }
 
@@ -66,11 +69,15 @@ idx_t FindPartitionInducedComponents(graph_t *graph, idx_t *where,
   /* Allocate memory required for the BFS traversal */
   perm = iMallocNoSignal((size_t)nvtxs,
       "FindPartitionInducedComponents: perm", &sigrval);
+  if (perm == NULL)
+    goto MEMORY_ERROR;
   todo = iMallocNoSignal((size_t)nvtxs,
       "FindPartitionInducedComponents: todo", &sigrval);
+  if (todo == NULL)
+    goto MEMORY_ERROR;
   touched = iMallocNoSignal((size_t)nvtxs,
       "FindPartitionInducedComponents: touched", &sigrval);
-  if (perm == NULL || todo == NULL || touched == NULL)
+  if (touched == NULL)
     goto MEMORY_ERROR;
   iincset(nvtxs, 0, perm);
   iincset(nvtxs, 0, todo);
@@ -116,13 +123,13 @@ idx_t FindPartitionInducedComponents(graph_t *graph, idx_t *where,
   return ncmps;
 
 MEMORY_ERROR:
+  saved_errno = errno != 0 ? errno : ENOMEM;
   if (mustfree_ccsr)
     gk_free((void **)&cptr, &cind, LTERM);
   if (mustfree_where)
     gk_free((void **)&where, LTERM);
   gk_free((void **)&perm, &todo, &touched, LTERM);
-  if (errno == 0)
-    errno = ENOMEM;
+  errno = saved_errno;
   return -1;
 }
 
@@ -225,9 +232,9 @@ idx_t IsConnected(graph_t *graph, idx_t report)
 idx_t IsConnectedSubdomain(ctrl_t *ctrl, graph_t *graph, idx_t pid, idx_t report)
 {
   idx_t i, j, k, nvtxs, first, last, nleft, ncmps, wgt;
-  idx_t *xadj, *adjncy, *where, *touched, *queue;
-  idx_t *cptr;
-  int sigrval;
+  idx_t *xadj, *adjncy, *where, *touched, *queue=NULL;
+  idx_t *cptr=NULL;
+  int sigrval, saved_errno;
 
   nvtxs  = graph->nvtxs;
   xadj   = graph->xadj;
@@ -244,15 +251,16 @@ idx_t IsConnectedSubdomain(ctrl_t *ctrl, graph_t *graph, idx_t pid, idx_t report
 
   touched = iMallocNoSignal((size_t)nvtxs,
       "IsConnected: touched", &sigrval);
+  if (touched == NULL)
+    goto MEMORY_ERROR;
   queue = iMallocNoSignal((size_t)nvtxs,
       "IsConnected: queue", &sigrval);
+  if (queue == NULL)
+    goto MEMORY_ERROR;
   cptr = iMallocNoSignal((size_t)nvtxs+1,
       "IsConnected: cptr", &sigrval);
-  if (touched == NULL || queue == NULL || cptr == NULL) {
-    ctrl->status = METIS_ERROR_MEMORY;
-    gk_free((void **)&touched, &queue, &cptr, LTERM);
-    return -1;
-  }
+  if (cptr == NULL)
+    goto MEMORY_ERROR;
   iset(nvtxs, 0, touched);
 
   for (i=0; i<nvtxs; i++) {
@@ -306,6 +314,14 @@ idx_t IsConnectedSubdomain(ctrl_t *ctrl, graph_t *graph, idx_t pid, idx_t report
   gk_free((void **)&touched, &queue, &cptr, LTERM);
 
   return (ncmps == 1 ? 1 : 0);
+
+MEMORY_ERROR:
+  saved_errno = errno != 0 ? errno : ENOMEM;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
+  gk_free((void **)&touched, &queue, &cptr, LTERM);
+  errno = saved_errno;
+  return -1;
 }
 
 
@@ -345,7 +361,8 @@ idx_t FindSepInducedComponents(ctrl_t *ctrl, graph_t *graph, idx_t *cptr,
   touched = iMallocNoSignal((size_t)nvtxs,
       "IsConnected: queue", &sigrval);
   if (touched == NULL) {
-    ctrl->status = METIS_ERROR_MEMORY;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
     return -1;
   }
   iset(nvtxs, 0, touched);
@@ -402,6 +419,7 @@ idx_t FindSepInducedComponents(ctrl_t *ctrl, graph_t *graph, idx_t *cptr,
 /*************************************************************************/
 void EliminateComponents(ctrl_t *ctrl, graph_t *graph)
 {
+  int saved_errno;
   idx_t i, ii, j, jj, k, me, nparts, nvtxs, ncon, ncmps, other, 
         ncand, target;
   idx_t *xadj, *adjncy, *vwgt, *adjwgt, *where, *pwgts;
@@ -610,9 +628,11 @@ void EliminateComponents(ctrl_t *ctrl, graph_t *graph)
   return;
 
 ERROR:
+  saved_errno = errno;
   if (ctrl->status == METIS_OK)
-    ctrl->status = METIS_ERROR_MEMORY;
+    ctrl->status = metis_errno_error();
   WCOREPOP;
+  errno = saved_errno;
 }
 
 
@@ -792,7 +812,17 @@ void MoveGroupContigForVol(ctrl_t *ctrl, graph_t *graph, idx_t to, idx_t gid,
   /* Note: a ComputeCut()==mincut check is not valid here: for objtype=vol the
      edge weights are set to 1+vsize[u]+vsize[v], so ComputeCut() returns the
      vsize-weighted cut while graph->mincut tracks the unweighted edge count. */
-  ASSERTP(ComputeVolume(graph, where) == graph->minvol,
-      ("%"PRIDX" %"PRIDX"\n", ComputeVolume(graph, where), graph->minvol));
+#if GKLIB_ASSERTIONS_ENABLED
+  {
+    idx_t volume = ComputeVolume(graph, where);
+    if (volume < 0) {
+      if (ctrl->status == METIS_OK)
+        ctrl->status = metis_errno_error();
+      return;
+    }
+    ASSERTP(volume == graph->minvol,
+        ("%"PRIDX" %"PRIDX"\n", volume, graph->minvol));
+  }
+#endif
 
 }

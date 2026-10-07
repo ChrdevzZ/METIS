@@ -24,9 +24,35 @@
 
 
 static const char *failed_message;
+static int failed_errno=ENOMEM, failure_seen, clobber_cleanup;
+static size_t allocations_after_failure, cleanup_clobbers;
+
+
+static FILE *OpenCapture(void)
+{
+#ifdef _WIN32
+  return tmpfile();
+#else
+  char name[] = "stat-failure-XXXXXX";
+  FILE *stream;
+  int fd = mkstemp(name);
+
+  if (fd < 0)
+    return NULL;
+  if (unlink(name) != 0) {
+    close(fd);
+    return NULL;
+  }
+  stream = fdopen(fd, "w+b");
+  if (stream == NULL)
+    close(fd);
+  return stream;
+#endif
+}
 
 
 void *__real_gk_malloc(size_t nbytes, const char *msg);
+void __real_free(void *ptr);
 
 
 /*************************************************************************/
@@ -34,10 +60,14 @@ void *__real_gk_malloc(size_t nbytes, const char *msg);
 /*************************************************************************/
 void *__wrap_gk_malloc(size_t nbytes, const char *msg)
 {
+  if (failure_seen)
+    allocations_after_failure++;
   if (failed_message != NULL && strcmp(msg, failed_message) == 0) {
-    errno = ENOMEM;
-    gk_errexit(SIGMEM, "Injected result-reporting allocation failure");
-    errno = ENOMEM;
+    failure_seen = 1;
+    errno = failed_errno;
+    gk_errexit(failed_errno == EIO ? SIGERR : SIGMEM,
+        "Injected result-reporting allocation failure");
+    errno = failed_errno;
     return NULL;
   }
 
@@ -46,16 +76,33 @@ void *__wrap_gk_malloc(size_t nbytes, const char *msg)
 
 
 /*************************************************************************/
+/*! Allows successful cleanup to change errno after the selected failure. */
+/*************************************************************************/
+void __wrap_free(void *ptr)
+{
+  int should_clobber = failure_seen && clobber_cleanup && ptr != NULL;
+
+  __real_free(ptr);
+  if (should_clobber) {
+    cleanup_clobbers++;
+    errno = EACCES;
+  }
+}
+
+
+/*************************************************************************/
 /*! Requires a failed report to leave stdout empty and release its work. */
 /*************************************************************************/
 static int CheckReportingFailureOutput(params_t *params, graph_t *graph,
-    idx_t *where, const char *message)
+    idx_t *where, const char *message, int bipartite)
 {
   FILE *capture;
   long output_size;
-  int saved_stdout, status, stdout_fd;
+  int saved_stdout, status, stdout_fd, saved_errno, expected;
+  idx_t *old_vwgt=graph->vwgt, *old_adjwgt=graph->adjwgt;
 
-  capture = tmpfile();
+  /* Create the POSIX capture exclusively in the binary working directory. */
+  capture = OpenCapture();
   if (capture == NULL)
     return 1;
   if (fflush(stdout) != 0) {
@@ -73,8 +120,17 @@ static int CheckReportingFailureOutput(params_t *params, graph_t *graph,
   }
 
   failed_message = message;
-  status = ComputePartitionInfo(params, graph, where);
+  failure_seen = 0;
+  allocations_after_failure = cleanup_clobbers = 0;
+  errno = 0;
+  status = METIS_OK;
+  if (bipartite)
+    ComputePartitionInfoBipartite(graph, params->nparts, where);
+  else
+    status = ComputePartitionInfo(params, graph, where);
+  saved_errno = errno;
   failed_message = NULL;
+  failure_seen = 0;
   if (fflush(stdout) != 0 || fseek(capture, 0, SEEK_END) != 0)
     output_size = -1;
   else
@@ -88,12 +144,28 @@ static int CheckReportingFailureOutput(params_t *params, graph_t *graph,
   TEST_CLOSE(saved_stdout);
   fclose(capture);
 
-  if (status != METIS_ERROR_MEMORY)
+  expected = failed_errno == EIO ? METIS_ERROR : METIS_ERROR_MEMORY;
+  if ((!bipartite && status != expected) || saved_errno != failed_errno) {
+    fprintf(stderr, "report %s: status %d errno %d, expected %d/%d\n",
+        message, status, saved_errno, expected, failed_errno);
     return 5;
+  }
   if (output_size != 0)
     return 6;
   if (gk_GetCurMemoryUsed() != 0)
     return 7;
+  if (allocations_after_failure != 0) {
+    fprintf(stderr, "report %s: %zu allocations after failure\n",
+        message, allocations_after_failure);
+    return 8;
+  }
+  if (graph->vwgt != old_vwgt || graph->adjwgt != old_adjwgt)
+    return 9;
+  if (!bipartite && clobber_cleanup &&
+      strcmp(message, "ComputeVolume: marker") != 0 &&
+      strcmp(message, "ComputePartitionInfo: kpwgts") != 0 &&
+      cleanup_clobbers == 0)
+    return 10;
   return 0;
 }
 
@@ -145,10 +217,17 @@ static int CheckReportingFailures(int exit_on_error)
 
   gk_set_exit_on_error(exit_on_error);
   for (i=0; i<sizeof(messages)/sizeof(messages[0]); i++) {
-    status = CheckReportingFailureOutput(&params, &graph, where, messages[i]);
+    status = CheckReportingFailureOutput(&params, &graph, where, messages[i], 0);
     if (status != 0)
       return 10+10*(int)i+status;
   }
+  status = CheckReportingFailureOutput(&params, &graph, where, messages[0], 1);
+  if (status != 0)
+    return 160+status;
+  graph.vwgt = graph.adjwgt = NULL;
+  status = CheckReportingFailureOutput(&params, &graph, where, messages[0], 1);
+  if (status != 0)
+    return 170+status;
 
   return 0;
 }
@@ -224,13 +303,23 @@ static int CheckConnectivityFailures(int exit_on_error)
 
 int main(void)
 {
-  int status;
+  int errors[] = {ENOMEM, EOVERFLOW, EIO};
+  int status=0, mode, cleanup;
+  size_t error;
 
   if (!gk_malloc_init())
     return 1;
-  status = CheckReportingFailures(0);
-  if (status == 0)
-    status = CheckReportingFailures(1);
+  for (cleanup=0; cleanup<2 && status == 0; cleanup++) {
+    clobber_cleanup = cleanup;
+    for (mode=0; mode<2 && status == 0; mode++) {
+      for (error=0; error<sizeof(errors)/sizeof(errors[0]) && status == 0; error++) {
+        failed_errno = errors[error];
+        status = CheckReportingFailures(mode);
+      }
+    }
+  }
+  failed_errno = ENOMEM;
+  clobber_cleanup = 0;
   if (status == 0)
     status = CheckConnectivityFailures(0);
   if (status == 0)

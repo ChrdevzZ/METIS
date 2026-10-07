@@ -45,7 +45,7 @@ int MinCover(idx_t *xadj, idx_t *adjncy, idx_t asize, idx_t bsize, idx_t *cover,
   idx_t *mate=NULL, *queue=NULL, *flag=NULL, *level=NULL, *lst=NULL;
   idx_t fptr, rptr, lstptr;
   idx_t row, maxlevel, col;
-  int sigrval, status;
+  int sigrval, status, saved_errno;
 
   if (xadj == NULL || adjncy == NULL || cover == NULL || csize == NULL ||
       asize < 0 || bsize < asize) {
@@ -143,8 +143,10 @@ int MinCover(idx_t *xadj, idx_t *adjncy, idx_t asize, idx_t bsize, idx_t *cover,
   return status;
 
 MEMORY_ERROR:
+  saved_errno = errno != 0 ? errno : ENOMEM;
   gk_free((void **)&mate, &flag, &level, &queue, &lst, LTERM);
-  return METIS_ERROR_MEMORY;
+  errno = saved_errno;
+  return sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
 }
 
 
@@ -208,7 +210,7 @@ int MinCover_Decompose(idx_t *xadj, idx_t *adjncy, idx_t asize, idx_t bsize, idx
   where = iMallocNoSignal((size_t)bsize,
       "MinCover_Decompose: where", &sigrval);
   if (where == NULL)
-    return METIS_ERROR_MEMORY;
+    return sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
   for (i=0; i<10; i++)
     card[i] = 0;
 

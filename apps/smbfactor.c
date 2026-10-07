@@ -42,7 +42,8 @@ static int AllocateFactorArray(size_t count, idx_t value, const char *message,
 
   *r_array = NULL;
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
+    if (errno == 0)
+      errno = ENOMEM;
     return 0;
   }
   METIS_SIGCATCH(sigrval);
@@ -57,7 +58,7 @@ static int AllocateFactorArray(size_t count, idx_t value, const char *message,
 #endif
       *r_array = ismalloc(count, value, message);
   }
-  gk_siguntrap();
+  metis_siguntrap();
 
   if (sigrval != 0) {
     if (errno == 0)
@@ -192,8 +193,10 @@ int ComputeFillIn(graph_t *graph, idx_t *perm, idx_t *iperm,
   status = METIS_OK;
 
 cleanup:
-  if (status != METIS_OK)
+  if (status != METIS_OK) {
+    status = metis_errno_error();
     saved_errno = errno != 0 ? errno : ENOMEM;
+  }
   gk_free((void **)&xlnz, &xnzsub, &nzsub, LTERM);
 
   /* Relabel the vertices so that it starts from 0 */

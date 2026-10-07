@@ -21,6 +21,7 @@
 /*************************************************************************/
 graph_t *CoarsenGraph(ctrl_t *ctrl, graph_t *graph)
 {
+  int saved_errno;
   idx_t i, eqewgts, level=0, matchstatus;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->CoarsenTmr));
@@ -91,8 +92,11 @@ graph_t *CoarsenGraph(ctrl_t *ctrl, graph_t *graph)
   return graph;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  saved_errno = errno;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = metis_errno_error();
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->CoarsenTmr));
+  errno = saved_errno;
   return NULL;
 }
 
@@ -104,6 +108,7 @@ MEMORY_ERROR:
 /*************************************************************************/
 graph_t *CoarsenGraphNlevels(ctrl_t *ctrl, graph_t *graph, idx_t nlevels)
 {
+  int saved_errno;
   idx_t i, eqewgts, level, matchstatus;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->CoarsenTmr));
@@ -175,8 +180,11 @@ graph_t *CoarsenGraphNlevels(ctrl_t *ctrl, graph_t *graph, idx_t nlevels)
   return graph;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  saved_errno = errno;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = metis_errno_error();
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->CoarsenTmr));
+  errno = saved_errno;
   return NULL;
 }
 
@@ -188,6 +196,7 @@ MEMORY_ERROR:
 /**************************************************************************/
 idx_t Match_RM(ctrl_t *ctrl, graph_t *graph)
 {
+  int saved_errno;
   idx_t i, pi, ii, j, jj, jjinc, k, nvtxs, ncon, cnvtxs, maxidx, 
         last_unmatched, avgdegree, bnum;
   idx_t *xadj, *vwgt, *adjncy, *adjwgt, *maxvwgt;
@@ -330,9 +339,12 @@ idx_t Match_RM(ctrl_t *ctrl, graph_t *graph)
   return cnvtxs;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  saved_errno = errno;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = metis_errno_error();
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
   WCOREPOP;
+  errno = saved_errno;
   return -1;
 }
 
@@ -345,6 +357,7 @@ MEMORY_ERROR:
 /**************************************************************************/
 idx_t Match_SHEM(ctrl_t *ctrl, graph_t *graph)
 {
+  int saved_errno;
   idx_t i, pi, ii, j, jj, jjinc, k, nvtxs, ncon, cnvtxs, maxidx, maxwgt, 
         last_unmatched, avgdegree, bnum;
   idx_t *xadj, *vwgt, *adjncy, *adjwgt, *maxvwgt;
@@ -491,9 +504,12 @@ idx_t Match_SHEM(ctrl_t *ctrl, graph_t *graph)
   return cnvtxs;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  saved_errno = errno;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = metis_errno_error();
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
   WCOREPOP;
+  errno = saved_errno;
   return -1;
 }
 
@@ -533,6 +549,7 @@ idx_t Match_2Hop(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
 idx_t Match_2HopAny(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match, 
           idx_t cnvtxs, size_t *r_nunmatched, idx_t maxdegree)
 {
+  int saved_errno;
   idx_t i, pi, ii, j, jj, k, nvtxs;
   idx_t *xadj, *adjncy, *colptr, *rowind;
   idx_t *cmap;
@@ -608,9 +625,12 @@ idx_t Match_2HopAny(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
   return cnvtxs;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  saved_errno = errno;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = metis_errno_error();
   WCOREPOP;
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->Aux3Tmr));
+  errno = saved_errno;
   return -1;
 }
 
@@ -626,6 +646,7 @@ MEMORY_ERROR:
 idx_t Match_2HopAll(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match, 
           idx_t cnvtxs, size_t *r_nunmatched, idx_t maxdegree)
 {
+  int saved_errno;
   idx_t i, pi, pk, ii, j, jj, k, nvtxs, mask, idegree, ncand;
   idx_t *xadj, *adjncy;
   idx_t *cmap, *mark;
@@ -650,8 +671,10 @@ idx_t Match_2HopAll(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
   }
 
   /* collapse vertices with identical adjacency lists */
-  if ((uintmax_t)nunmatched > (uintmax_t)IDX_MAX)
+  if ((uintmax_t)nunmatched > (uintmax_t)IDX_MAX) {
+    errno = EOVERFLOW;
     goto MEMORY_ERROR;
+  }
   keys = ikvwspacemalloc(ctrl, (idx_t)nunmatched);
   if (keys == NULL)
     goto MEMORY_ERROR;
@@ -713,9 +736,12 @@ idx_t Match_2HopAll(ctrl_t *ctrl, graph_t *graph, idx_t *perm, idx_t *match,
   return cnvtxs;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  saved_errno = errno;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = metis_errno_error();
   WCOREPOP;
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->Aux3Tmr));
+  errno = saved_errno;
   return -1;
 }
 
@@ -727,6 +753,7 @@ MEMORY_ERROR:
 /**************************************************************************/
 idx_t Match_JC(ctrl_t *ctrl, graph_t *graph)
 {
+  int saved_errno;
   idx_t i, pi, ii, iii, j, jj, jjj, jjinc, k, nvtxs, ncon, cnvtxs, maxidx, 
         last_unmatched, avgdegree, bnum;
   idx_t *xadj, *vwgt, *adjncy, *adjwgt, *maxvwgt;
@@ -912,9 +939,12 @@ idx_t Match_JC(ctrl_t *ctrl, graph_t *graph)
   return cnvtxs;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  saved_errno = errno;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = metis_errno_error();
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->MatchTmr));
   WCOREPOP;
+  errno = saved_errno;
   return -1;
 }
 
@@ -956,6 +986,8 @@ int CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
   idx_t *medianewgts=NULL, *medianenoise=NULL, *noise=NULL;
   ikv_t *keys=NULL;
 
+  int saved_errno;
+
   if (!WCOREPUSH)
     return METIS_ERROR_MEMORY;
 
@@ -979,8 +1011,10 @@ int CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
   if (dropedges) {
     for (nkeys=0, v=0; v<nvtxs; v++) 
       nkeys = gk_max(nkeys, xadj[v+1]-xadj[v]);
-    if (nkeys > (IDX_MAX-1)/2)
+    if (nkeys > (IDX_MAX-1)/2) {
+      errno = EOVERFLOW;
       goto MEMORY_ERROR;
+    }
     nkeys = 2*nkeys+1;
 
     keys        = ikvwspacemalloc(ctrl, nkeys);
@@ -1209,6 +1243,8 @@ int CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
   }
 
   ReAdjustMemory(ctrl, graph, cgraph);
+  if (ctrl->status != METIS_OK)
+    goto MEMORY_ERROR;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->ContractTmr));
 
@@ -1216,14 +1252,17 @@ int CreateCoarseGraph(ctrl_t *ctrl, graph_t *graph, idx_t cnvtxs,
   return METIS_OK;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  saved_errno = errno != 0 ? errno : ENOMEM;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = metis_errno_error();
   if (cgraph != NULL) {
     graph->coarser = NULL;
     FreeGraph(&cgraph);
   }
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->ContractTmr));
   WCOREPOP;
-  return METIS_ERROR_MEMORY;
+  errno = saved_errno;
+  return ctrl->status;
 }
 
 
@@ -1234,7 +1273,7 @@ MEMORY_ERROR:
 graph_t *SetupCoarseGraph(graph_t *graph, idx_t cnvtxs, int dovsize)
 {
   graph_t *cgraph=NULL;
-  int sigrval;
+  int sigrval, saved_errno;
   size_t scnvtxs, snedges, sncon, nvwgt;
 
   if (graph == NULL || cnvtxs < 0 || graph->ncon <= 0 ||
@@ -1319,9 +1358,9 @@ graph_t *SetupCoarseGraph(graph_t *graph, idx_t cnvtxs, int dovsize)
   return cgraph;
 
 MEMORY_ERROR:
-  if (errno == 0)
-    errno = ENOMEM;
+  saved_errno = errno != 0 ? errno : ENOMEM;
   FreeGraph(&cgraph);
+  errno = saved_errno;
   return NULL;
 }
 
@@ -1334,7 +1373,7 @@ MEMORY_ERROR:
 void ReAdjustMemory(ctrl_t *ctrl, graph_t *graph, graph_t *cgraph) 
 {
   idx_t *new_adjncy, *new_adjwgt;
-  int sigrval, saved_errno;
+  int sigrval, saved_errno, sigtrap_failed;
 
   if (cgraph->nedges > 10000 && cgraph->nedges < 0.9*graph->nedges) {
     new_adjncy = imalloc(cgraph->nedges,
@@ -1345,14 +1384,17 @@ void ReAdjustMemory(ctrl_t *ctrl, graph_t *graph, graph_t *cgraph)
 
     new_adjwgt = iReallocNoSignal(cgraph->adjwgt,
         (size_t)cgraph->nedges, "ReAdjustMemory: adjwgt",
-        &sigrval);
+        &sigrval, &sigtrap_failed);
     if (new_adjwgt == NULL) {
       saved_errno = errno != 0 ? errno : ENOMEM;
       gk_free((void **)&new_adjncy, LTERM);
       errno = saved_errno;
+      if (sigtrap_failed && ctrl != NULL && ctrl->status >= 0)
+        ctrl->status = metis_rcode(sigrval);
       if (sigrval != 0)
         gk_errexit(sigrval,
             "ReAdjustMemory: failed to resize adjacency arrays");
+      errno = saved_errno;
       return;
     }
 

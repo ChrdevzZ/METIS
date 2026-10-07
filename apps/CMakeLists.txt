@@ -8,7 +8,7 @@ add_executable(cmpfillin cmpfillin.c io.c smbfactor.c)
 # Applications keep private access to implementation headers and GKlib.
 foreach(prog gpmetis ndmetis mpmetis m2gmetis graphchk cmpfillin)
   target_include_directories(${prog} PRIVATE "${PROJECT_SOURCE_DIR}/src")
-  target_link_libraries(${prog} PRIVATE METIS::metis GKlib::GKlib)
+  target_link_libraries(${prog} PRIVATE ${metis_private_library} GKlib::GKlib)
   if(UNIX)
     target_link_libraries(${prog} PRIVATE m)
   endif()

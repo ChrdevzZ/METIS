@@ -19,6 +19,7 @@
 void Init2WayPartition(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, 
          idx_t niparts) 
 {
+  int saved_errno;
   mdbglvl_et dbglvl;
 
   ASSERT(graph->tvwgt[0] >= 0);
@@ -59,8 +60,11 @@ void Init2WayPartition(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
 
   IFSET(ctrl->dbglvl, METIS_DBG_IPART, printf("Initial Cut: %"PRIDX"\n", graph->mincut));
 DONE:
+  saved_errno = errno;
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->InitPartTmr));
   ctrl->dbglvl = dbglvl;
+  if (ctrl->status != METIS_OK)
+    errno = saved_errno;
 
 }
 
@@ -70,6 +74,7 @@ DONE:
 /*************************************************************************/
 void InitSeparator(ctrl_t *ctrl, graph_t *graph, idx_t niparts) 
 {
+  int saved_errno;
   real_t ntpwgts[2] = {0.5, 0.5};
   mdbglvl_et dbglvl;
 
@@ -106,9 +111,12 @@ void InitSeparator(ctrl_t *ctrl, graph_t *graph, idx_t niparts)
   if (ctrl->status == METIS_OK)
     IFSET(ctrl->dbglvl, METIS_DBG_IPART,
         printf("Initial Sep: %"PRIDX"\n", graph->mincut));
+  saved_errno = errno;
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->InitPartTmr));
 
   ctrl->dbglvl = dbglvl;
+  if (ctrl->status != METIS_OK)
+    errno = saved_errno;
 
 }
 
@@ -122,6 +130,7 @@ void InitSeparator(ctrl_t *ctrl, graph_t *graph, idx_t niparts)
 void RandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, 
          idx_t niparts)
 {
+  int saved_errno;
   idx_t i, ii, j, k, nvtxs, pwgts[2], zeromaxpwgt, from, me, 
         bestcut=0, icut, mincut, inbfs;
   idx_t *xadj, *vwgt, *adjncy, *adjwgt, *where;
@@ -137,16 +146,20 @@ void RandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   adjwgt = graph->adjwgt;
 
   if (Allocate2WayPartitionMemory(ctrl, graph) != METIS_OK) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   where = graph->where;
 
   bestwhere = iwspacemalloc(ctrl, nvtxs);
-  perm      = iwspacemalloc(ctrl, nvtxs);
+  perm      = bestwhere != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
   if (bestwhere == NULL || perm == NULL) {
+    int cleanup_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -177,9 +190,13 @@ void RandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
     /* printf("IPART: %3"PRIDX" [%5"PRIDX" %5"PRIDX"] [%5"PRIDX" %5"PRIDX"] %5"PRIDX"\n", graph->nvtxs, pwgts[0], pwgts[1], graph->pwgts[0], graph->pwgts[1], graph->mincut); */
 
     Balance2Way(ctrl, graph, ntpwgts);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     /* printf("BPART: [%5"PRIDX" %5"PRIDX"] %5"PRIDX"\n", graph->pwgts[0], graph->pwgts[1], graph->mincut); */
 
     FM_2WayRefine(ctrl, graph, ntpwgts, 4);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     /* printf("RPART: [%5"PRIDX" %5"PRIDX"] %5"PRIDX"\n", graph->pwgts[0], graph->pwgts[1], graph->mincut); */
 
     if (inbfs==0 || bestcut > graph->mincut) {
@@ -193,7 +210,11 @@ void RandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   graph->mincut = bestcut;
   icopy(nvtxs, bestwhere, where);
 
+DONE:
+  saved_errno = errno;
   WCOREPOP;
+  if (ctrl->status != METIS_OK)
+    errno = saved_errno;
 }
 
 
@@ -206,6 +227,7 @@ void RandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
 void GrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, 
          idx_t niparts)
 {
+  int saved_errno;
   idx_t i, j, k, nvtxs, drain, nleft, first, last, 
         pwgts[2], oneminpwgt, onemaxpwgt, 
         from, me, bestcut=0, icut, mincut, inbfs;
@@ -222,17 +244,21 @@ void GrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   adjwgt = graph->adjwgt;
 
   if (Allocate2WayPartitionMemory(ctrl, graph) != METIS_OK) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   where = graph->where;
 
   bestwhere = iwspacemalloc(ctrl, nvtxs);
-  queue     = iwspacemalloc(ctrl, nvtxs);
-  touched   = iwspacemalloc(ctrl, nvtxs);
+  queue     = bestwhere != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  touched   = queue != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
   if (bestwhere == NULL || queue == NULL || touched == NULL) {
+    int cleanup_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -317,12 +343,16 @@ void GrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
     */
 
     Balance2Way(ctrl, graph, ntpwgts);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     /*
     printf("BPART: [%5"PRIDX" %5"PRIDX"] %5"PRIDX"\n", graph->pwgts[0],
         graph->pwgts[1], graph->mincut); 
     */
 
     FM_2WayRefine(ctrl, graph, ntpwgts, ctrl->niter);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     /*
     printf("RPART: [%5"PRIDX" %5"PRIDX"] %5"PRIDX"\n", graph->pwgts[0], 
         graph->pwgts[1], graph->mincut);
@@ -339,7 +369,11 @@ void GrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   graph->mincut = bestcut;
   icopy(nvtxs, bestwhere, where);
 
+DONE:
+  saved_errno = errno;
   WCOREPOP;
+  if (ctrl->status != METIS_OK)
+    errno = saved_errno;
 }
 
 
@@ -352,6 +386,7 @@ void GrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
 void McRandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, 
          idx_t niparts)
 {
+  int saved_errno;
   idx_t i, ii, j, k, nvtxs, ncon, from, bestcut=0, mincut, qnum;
   idx_t *bestwhere, *where, *perm, *counts;
   idx_t *vwgt;
@@ -365,17 +400,21 @@ void McRandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   vwgt  = graph->vwgt;
 
   if (Allocate2WayPartitionMemory(ctrl, graph) != METIS_OK) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   where = graph->where;
 
   bestwhere = iwspacemalloc(ctrl, nvtxs);
-  perm      = iwspacemalloc(ctrl, nvtxs);
-  counts    = iwspacemalloc(ctrl, ncon);
+  perm      = bestwhere != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  counts    = perm != NULL ? iwspacemalloc(ctrl, ncon) : NULL;
   if (bestwhere == NULL || perm == NULL || counts == NULL) {
+    int cleanup_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -393,10 +432,20 @@ void McRandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
     Compute2WayPartitionParams(ctrl, graph);
 
     FM_2WayRefine(ctrl, graph, ntpwgts, ctrl->niter);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     Balance2Way(ctrl, graph, ntpwgts);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     FM_2WayRefine(ctrl, graph, ntpwgts, ctrl->niter);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     Balance2Way(ctrl, graph, ntpwgts);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     FM_2WayRefine(ctrl, graph, ntpwgts, ctrl->niter);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
 
     if (inbfs == 0 || bestcut >= graph->mincut) {
       bestcut = graph->mincut;
@@ -409,7 +458,11 @@ void McRandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   graph->mincut = bestcut;
   icopy(nvtxs, bestwhere, where);
 
+DONE:
+  saved_errno = errno;
   WCOREPOP;
+  if (ctrl->status != METIS_OK)
+    errno = saved_errno;
 }
 
 
@@ -422,6 +475,7 @@ void McRandomBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
 void McGrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, 
          idx_t niparts)
 {
+  int saved_errno;
   idx_t i, j, k, nvtxs, ncon, from, bestcut=0, mincut;
   idx_t *bestwhere, *where;
   uintmax_t inbfs;
@@ -451,9 +505,17 @@ void McGrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
     Compute2WayPartitionParams(ctrl, graph);
 
     Balance2Way(ctrl, graph, ntpwgts);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     FM_2WayRefine(ctrl, graph, ntpwgts, ctrl->niter);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     Balance2Way(ctrl, graph, ntpwgts);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
     FM_2WayRefine(ctrl, graph, ntpwgts, ctrl->niter);
+    if (ctrl->status != METIS_OK)
+      goto DONE;
 
     if (inbfs == 0 || bestcut >= graph->mincut) {
       bestcut = graph->mincut;
@@ -466,7 +528,11 @@ void McGrowBisection(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   graph->mincut = bestcut;
   icopy(nvtxs, bestwhere, where);
 
+DONE:
+  saved_errno = errno;
   WCOREPOP;
+  if (ctrl->status != METIS_OK)
+    errno = saved_errno;
 }
 
 
@@ -484,6 +550,7 @@ static int Allocate2WayNodeBisectionMemory(ctrl_t *ctrl, graph_t *graph)
   nrinfo_t *cleanup_nrinfo;
   nrinfo_t * volatile nrinfo=NULL;
   idx_t nvtxs;
+  int saved_errno;
 
   if (ctrl == NULL || graph == NULL) {
     errno = EINVAL;
@@ -506,8 +573,9 @@ static int Allocate2WayNodeBisectionMemory(ctrl_t *ctrl, graph_t *graph)
   }
 
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
-    goto MEMORY_ERROR;
+    if (ctrl->status >= 0)
+      ctrl->status = metis_rcode(metis_sigtrap_error());
+    return ctrl->status;
   }
   METIS_SIGCATCH(sigrval);
   if (sigrval != 0)
@@ -525,7 +593,7 @@ static int Allocate2WayNodeBisectionMemory(ctrl_t *ctrl, graph_t *graph)
       id == NULL || ed == NULL || nrinfo == NULL)
     goto ALLOCATION_ERROR;
 
-  gk_siguntrap();
+  metis_siguntrap();
   gk_free((void **)&graph->pwgts, &graph->where, &graph->bndptr,
       &graph->bndind, &graph->id, &graph->ed, &graph->nrinfo, LTERM);
   graph->pwgts  = (idx_t *)pwgts;
@@ -538,6 +606,7 @@ static int Allocate2WayNodeBisectionMemory(ctrl_t *ctrl, graph_t *graph)
   return METIS_OK;
 
 ALLOCATION_ERROR:
+  saved_errno = errno;
   cleanup_pwgts = (idx_t *)pwgts;
   cleanup_where = (idx_t *)where;
   cleanup_bndptr = (idx_t *)bndptr;
@@ -547,13 +616,15 @@ ALLOCATION_ERROR:
   cleanup_nrinfo = (nrinfo_t *)nrinfo;
   gk_free((void **)&cleanup_pwgts, &cleanup_where, &cleanup_bndptr,
       &cleanup_bndind, &cleanup_id, &cleanup_ed, &cleanup_nrinfo, LTERM);
-  gk_siguntrap();
+  metis_siguntrap();
+  errno = saved_errno;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  if (ctrl->status >= 0)
+    ctrl->status = sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
   if (errno == 0)
-    errno = ENOMEM;
-  return METIS_ERROR_MEMORY;
+    errno = sigrval == SIGERR ? EINVAL : ENOMEM;
+  return ctrl->status;
 }
 
 
@@ -582,11 +653,13 @@ void GrowBisectionNode(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
   adjwgt = graph->adjwgt;
 
   bestwhere = iwspacemalloc(ctrl, nvtxs);
-  queue     = iwspacemalloc(ctrl, nvtxs);
-  touched   = iwspacemalloc(ctrl, nvtxs);
+  queue     = bestwhere != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  touched   = queue != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
   if (bestwhere == NULL || queue == NULL || touched == NULL) {
+    int cleanup_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -595,7 +668,9 @@ void GrowBisectionNode(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts,
 
 
   if (Allocate2WayNodeBisectionMemory(ctrl, graph) != METIS_OK) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   

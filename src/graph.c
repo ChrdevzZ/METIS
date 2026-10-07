@@ -33,6 +33,7 @@ int SetupGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t ncon, idx_t *xadj,
   int isvalid;
 #endif
   graph_t *cleanup_graph;
+  int saved_errno;
   graph_t * volatile graph=NULL;
 
   if (r_graph == NULL) {
@@ -67,18 +68,18 @@ int SetupGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t ncon, idx_t *xadj,
     return METIS_ERROR_MEMORY;
   }
 
-  if (!gk_sigtrap()) {
-    errno = ENOMEM;
-    return METIS_ERROR_MEMORY;
-  }
+  if (!gk_sigtrap())
+    return metis_rcode(metis_sigtrap_error());
   METIS_SIGCATCH(sigrval);
   if (sigrval != 0)
     goto SIGNAL_ERROR;
 
   /* allocate the graph and fill in the fields */
   graph = CreateGraph();
-  if (graph == NULL)
-    goto MEMORY_ERROR;
+  if (graph == NULL) {
+    sigrval = metis_sigtrap_error();
+    goto SIGNAL_ERROR;
+  }
 
   graph->nvtxs  = nvtxs;
   graph->nedges = nedges;
@@ -167,17 +168,19 @@ int SetupGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t ncon, idx_t *xadj,
 #endif
 
   *r_graph = (graph_t *)graph;
-  gk_siguntrap();
+  metis_siguntrap();
   return METIS_OK;
 
 MEMORY_ERROR:
   sigrval = SIGMEM;
 
 SIGNAL_ERROR:
+  saved_errno = errno;
   cleanup_graph = (graph_t *)graph;
   graph = NULL;
-  gk_siguntrap();
+  metis_siguntrap();
   FreeGraph(&cleanup_graph);
+  errno = saved_errno;
   if (errno == 0)
     errno = sigrval == SIGMEM ? ENOMEM : EINVAL;
   if (rstatus != METIS_OK)
@@ -212,10 +215,8 @@ int SetupGraph_tvwgt(graph_t *graph)
   }
 
   if (graph->tvwgt == NULL || graph->invtvwgt == NULL) {
-    if (!gk_sigtrap()) {
-      errno = ENOMEM;
-      return METIS_ERROR_MEMORY;
-    }
+    if (!gk_sigtrap())
+      return metis_rcode(metis_sigtrap_error());
     METIS_SIGCATCH(sigrval);
     if (sigrval == 0) {
       if (graph->tvwgt == NULL)
@@ -224,16 +225,16 @@ int SetupGraph_tvwgt(graph_t *graph)
         new_invtvwgt = rmalloc(graph->ncon,
             "SetupGraph_tvwgt: invtvwgt");
     }
-    gk_siguntrap();
+    metis_siguntrap();
     if (sigrval != 0 ||
         (graph->tvwgt == NULL && new_tvwgt == NULL) ||
         (graph->invtvwgt == NULL && new_invtvwgt == NULL)) {
+      int saved_errno = errno != 0 ? errno : ENOMEM;
       cleanup_tvwgt = (idx_t *)new_tvwgt;
       cleanup_invtvwgt = (real_t *)new_invtvwgt;
       gk_free((void **)&cleanup_tvwgt, &cleanup_invtvwgt, LTERM);
-      if (errno == 0)
-        errno = ENOMEM;
-      return METIS_ERROR_MEMORY;
+      errno = saved_errno;
+      return sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
     }
 
     if (graph->tvwgt == NULL)
@@ -270,18 +271,16 @@ int SetupGraph_label(graph_t *graph)
   }
 
   if (graph->label == NULL) {
-    if (!gk_sigtrap()) {
-      errno = ENOMEM;
-      return METIS_ERROR_MEMORY;
-    }
+    if (!gk_sigtrap())
+      return metis_rcode(metis_sigtrap_error());
     METIS_SIGCATCH(sigrval);
     if (sigrval == 0)
       new_label = imalloc(graph->nvtxs, "SetupGraph_label: label");
-    gk_siguntrap();
+    metis_siguntrap();
     if (sigrval != 0 || new_label == NULL) {
       if (errno == 0)
         errno = ENOMEM;
-      return METIS_ERROR_MEMORY;
+      return sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
     }
     graph->label = (idx_t *)new_label;
   }
@@ -300,6 +299,7 @@ int SetupSplitGraph(graph_t *graph, idx_t snvtxs, idx_t snedges,
 {
   volatile int sigrval=0;
   graph_t *cleanup_graph;
+  int saved_errno;
   graph_t * volatile sgraph=NULL;
 
   if (r_sgraph == NULL)
@@ -318,17 +318,17 @@ int SetupSplitGraph(graph_t *graph, idx_t snvtxs, idx_t snedges,
     return METIS_ERROR_MEMORY;
   }
 
-  if (!gk_sigtrap()) {
-    errno = ENOMEM;
-    return METIS_ERROR_MEMORY;
-  }
+  if (!gk_sigtrap())
+    return metis_rcode(metis_sigtrap_error());
   METIS_SIGCATCH(sigrval);
   if (sigrval != 0)
     goto SIGNAL_ERROR;
 
   sgraph = CreateGraph();
-  if (sgraph == NULL)
-    goto MEMORY_ERROR;
+  if (sgraph == NULL) {
+    sigrval = metis_sigtrap_error();
+    goto SIGNAL_ERROR;
+  }
 
   sgraph->nvtxs  = snvtxs;
   sgraph->nedges = snedges;
@@ -356,17 +356,19 @@ int SetupSplitGraph(graph_t *graph, idx_t snvtxs, idx_t snedges,
     goto MEMORY_ERROR;
 
   *r_sgraph = (graph_t *)sgraph;
-  gk_siguntrap();
+  metis_siguntrap();
   return METIS_OK;
 
 MEMORY_ERROR:
   sigrval = SIGMEM;
 
 SIGNAL_ERROR:
+  saved_errno = errno;
   cleanup_graph = (graph_t *)sgraph;
   sgraph = NULL;
-  gk_siguntrap();
+  metis_siguntrap();
   FreeGraph(&cleanup_graph);
+  errno = saved_errno;
   if (errno == 0)
     errno = sigrval == SIGMEM ? ENOMEM : EINVAL;
   if (sigrval != SIGMEM)
@@ -383,14 +385,12 @@ graph_t *CreateGraph(void)
   volatile int sigrval=0;
   graph_t * volatile graph=NULL;
 
-  if (!gk_sigtrap()) {
-    errno = ENOMEM;
+  if (!gk_sigtrap())
     return NULL;
-  }
   METIS_SIGCATCH(sigrval);
   if (sigrval == 0)
     graph = (graph_t *)gk_malloc(sizeof(graph_t), "CreateGraph: graph");
-  gk_siguntrap();
+  metis_siguntrap();
   if (sigrval != 0 || graph == NULL) {
     if (errno == 0)
       errno = ENOMEM;

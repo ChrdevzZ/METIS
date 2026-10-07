@@ -6,33 +6,110 @@
  * Allocation-by-allocation signal recovery checks for private constructors.
  */
 
-#include "metislib.h"
+#include "../apps/metisbin.h"
+#ifdef METIS_TEST_POSIX_QUERY
+#include <pthread.h>
+#endif
 
 
 static size_t allocation_count;
 static size_t fail_at=SIZE_MAX;
 static int fail_nosignal;
+static int in_mcore_create;
+static size_t mcore_allocator_calls, mcore_allocator_hits;
+static size_t mcore_malloc_calls, mcore_calloc_calls;
 static const char *fail_message;
+static size_t message_hits;
 static int count_mallocs, in_gk_malloc;
 static void *mallocs[16];
 static size_t fail_malloc_at=SIZE_MAX, malloc_count, nmallocs;
 static size_t fail_mcore_at=SIZE_MAX, mcore_count;
+static int recursive_status=METIS_OK, recursive_calls, in_recursive;
+static int fail_recursive_allocation, initialization_failed;
+static size_t allocations_after_failure;
+static int trap_armed, trap_hits, trap_error, clobber_cleanup, heap_workspace;
+static int heap_workspace_invalid, heap_pop_active;
+static size_t trap_count, trap_fail_at, cleanup_clobbers;
+static size_t heap_workspace_hits, heap_pop_clobbers;
+static int query_ncon=1, query_edge_separator, query_minconn;
+static int release_failure;
+#ifdef METIS_TEST_POSIX_QUERY
+static int SameQueryMask(const sigset_t *left, const sigset_t *right);
+int __real_pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset);
+#endif
 
 
 void *__real_gk_malloc(size_t nbytes, const char *msg);
 void *__real_gk_malloc_nosignal(size_t nbytes);
 void *__real_gk_mcoreMalloc(gk_mcore_t *mcore, size_t nbytes);
+gk_mcore_t *__real_gk_mcoreCreate(size_t coresize);
+void __real_gk_mcorePop(gk_mcore_t *mcore);
 void *__real_malloc(size_t nbytes);
+void *__real_calloc(size_t count, size_t nbytes);
 void __real_free(void *ptr);
+int __real_gk_sigtrap(void);
+int __real_gk_siguntrap(void);
+int __real_METIS_PartGraphRecursive(idx_t *nvtxs, idx_t *ncon, idx_t *xadj,
+    idx_t *adjncy, idx_t *vwgt, idx_t *vsize, idx_t *adjwgt, idx_t *nparts,
+    real_t *tpwgts, real_t *ubvec, idx_t *options, idx_t *objval, idx_t *part);
 
 
 /*************************************************************************/
-/*! Records allocations made directly by the mesh graph constructors. */
+/*! Injects returned errors at the recursive API boundary of initialization. */
+/*************************************************************************/
+int __wrap_METIS_PartGraphRecursive(idx_t *nvtxs, idx_t *ncon, idx_t *xadj,
+    idx_t *adjncy, idx_t *vwgt, idx_t *vsize, idx_t *adjwgt, idx_t *nparts,
+    real_t *tpwgts, real_t *ubvec, idx_t *options, idx_t *objval, idx_t *part)
+{
+  int status;
+
+  recursive_calls++;
+  if (recursive_status != METIS_OK) {
+    initialization_failed = 1;
+    errno = recursive_status == METIS_ERROR_MEMORY ? ENOMEM : EINVAL;
+    return recursive_status;
+  }
+  in_recursive++;
+  status = __real_METIS_PartGraphRecursive(nvtxs, ncon, xadj, adjncy,
+      vwgt, vsize, adjwgt, nparts, tpwgts, ubvec, options, objval, part);
+  in_recursive--;
+  if (status != METIS_OK)
+    initialization_failed = 1;
+  return status;
+}
+
+
+/*************************************************************************/
+/*! Fails one real allocator call within the selected mcore constructor. */
+/*************************************************************************/
+static int FailMcoreAllocator(int zero_fill)
+{
+  if (!in_mcore_create || !fail_nosignal)
+    return 0;
+  mcore_allocator_calls++;
+  if (zero_fill)
+    mcore_calloc_calls++;
+  else
+    mcore_malloc_calls++;
+  if (++allocation_count != fail_at)
+    return 0;
+  mcore_allocator_hits++;
+  in_mcore_create = 0;
+  initialization_failed = 1;
+  errno = ENOMEM;
+  return 1;
+}
+
+
+/*************************************************************************/
+/*! Records mesh storage and the real malloc boundary of mcore creation. */
 /*************************************************************************/
 void *__wrap_malloc(size_t nbytes)
 {
   void *ptr;
 
+  if (FailMcoreAllocator(0))
+    return NULL;
   if (count_mallocs && !in_gk_malloc && ++malloc_count == fail_malloc_at) {
     errno = ENOMEM;
     return NULL;
@@ -45,11 +122,23 @@ void *__wrap_malloc(size_t nbytes)
 
 
 /*************************************************************************/
+/*! Covers the malloc/zero-fill to calloc transformation under IPO. */
+/*************************************************************************/
+void *__wrap_calloc(size_t count, size_t nbytes)
+{
+  if (FailMcoreAllocator(1))
+    return NULL;
+  return __real_calloc(count, nbytes);
+}
+
+
+/*************************************************************************/
 /*! Removes direct mesh allocations from the outstanding set. */
 /*************************************************************************/
 void __wrap_free(void *ptr)
 {
   size_t i;
+  int should_clobber = clobber_cleanup && initialization_failed && ptr != NULL;
 
   if (count_mallocs && ptr != NULL) {
     for (i=0; i<nmallocs; i++) {
@@ -60,20 +149,63 @@ void __wrap_free(void *ptr)
     }
   }
   __real_free(ptr);
+  if (should_clobber) {
+    cleanup_clobbers++;
+    if (heap_workspace && heap_pop_active)
+      heap_pop_clobbers++;
+    errno = EACCES;
+  }
 }
 
 
 /*************************************************************************/
-/*! Injects one reported allocation failure for the GNU linker fixture. */
+/*! Controls a frame-setup return at the real production call boundary. */
+/*************************************************************************/
+int __wrap_gk_sigtrap(void)
+{
+  if (trap_armed && ++trap_count == trap_fail_at) {
+    trap_armed = 0;
+    trap_hits++;
+    initialization_failed = 1;
+    errno = trap_error;
+    return 0;
+  }
+  return __real_gk_sigtrap();
+}
+
+
+/*************************************************************************/
+/*! Leaves the outer API frame active when its release fails. */
+/*************************************************************************/
+int __wrap_gk_siguntrap(void)
+{
+  if (release_failure && gk_cur_jbufs == 0) {
+    errno = EIO;
+    return 0;
+  }
+  return __real_gk_siguntrap();
+}
+
+
+/*************************************************************************/
+/*! Injects one reported allocation failure for the wrapping linker fixture. */
 /*************************************************************************/
 void *__wrap_gk_malloc(size_t nbytes, const char *msg)
 {
   void *ptr;
 
+  if (initialization_failed)
+    allocations_after_failure++;
   if (!fail_nosignal) {
     allocation_count++;
     if (allocation_count == fail_at ||
-        (fail_message != NULL && strcmp(msg, fail_message) == 0)) {
+        (fail_message != NULL && strcmp(msg, fail_message) == 0) ||
+        (fail_recursive_allocation && in_recursive &&
+         strcmp(msg, "SetupCtrl: ctrl") == 0)) {
+      if (fail_message != NULL && strcmp(msg, fail_message) == 0)
+        message_hits++;
+      if (clobber_cleanup || strcmp(msg, "InitKWayPartitioning: ubvec") == 0)
+        initialization_failed = 1;
       errno = ENOMEM;
       gk_errexit(SIGMEM, "Injected reported allocation failure");
       errno = ENOMEM;
@@ -88,11 +220,13 @@ void *__wrap_gk_malloc(size_t nbytes, const char *msg)
 
 
 /*************************************************************************/
-/*! Injects one no-signal allocation failure for the GNU linker fixture. */
+/*! Injects one no-signal allocation failure for the wrapping linker fixture. */
 /*************************************************************************/
 void *__wrap_gk_malloc_nosignal(size_t nbytes)
 {
-  if (fail_nosignal) {
+  if (initialization_failed)
+    allocations_after_failure++;
+  if (fail_nosignal && !in_mcore_create) {
     allocation_count++;
     if (allocation_count == fail_at) {
       errno = ENOMEM;
@@ -104,11 +238,15 @@ void *__wrap_gk_malloc_nosignal(size_t nbytes)
 
 
 /*************************************************************************/
-/*! Injects one workspace allocation failure for the GNU linker fixture. */
+/*! Injects one workspace allocation failure for the wrapping linker fixture. */
 /*************************************************************************/
 void *__wrap_gk_mcoreMalloc(gk_mcore_t *mcore, size_t nbytes)
 {
+  if (initialization_failed)
+    allocations_after_failure++;
   if (fail_mcore_at != SIZE_MAX && ++mcore_count == fail_mcore_at) {
+    if (clobber_cleanup)
+      initialization_failed = 1;
     errno = ENOMEM;
     gk_errexit(SIGMEM, "Injected workspace allocation failure");
     errno = ENOMEM;
@@ -127,6 +265,9 @@ static void FailAllocation(size_t allocation, int nosignal)
   fail_at = allocation;
   fail_nosignal = nosignal;
   fail_message = NULL;
+  mcore_allocator_calls = 0;
+  mcore_allocator_hits = 0;
+  mcore_malloc_calls = mcore_calloc_calls = 0;
 }
 
 
@@ -149,6 +290,7 @@ static void FailMessage(const char *message)
   fail_at = SIZE_MAX;
   fail_nosignal = 0;
   fail_message = message;
+  message_hits = 0;
 }
 
 
@@ -161,6 +303,8 @@ static void AllowAllocations(void)
   fail_nosignal = 0;
   fail_message = NULL;
   fail_mcore_at = SIZE_MAX;
+  in_mcore_create = 0;
+  in_gk_malloc = 0;
 }
 
 
@@ -771,11 +915,16 @@ static int CheckCoarseGraphSizeFailures(void)
 /*************************************************************************/
 static int CheckWorkspaceFailures(void)
 {
-  ctrl_t ctrl;
-  graph_t graph;
+  static ctrl_t ctrl;
+  static graph_t graph;
   gk_mcore_t *old_mcore;
-  size_t baseline, fail;
-  int status;
+  uintptr_t old_address;
+  unsigned char *marker;
+  size_t baseline, fail, total_hits=0;
+  int mode, status, depth, saved_errno;
+#ifdef METIS_TEST_POSIX_QUERY
+  sigset_t before, after;
+#endif
 
   memset(&ctrl, 0, sizeof(ctrl));
   memset(&graph, 0, sizeof(graph));
@@ -789,35 +938,86 @@ static int CheckWorkspaceFailures(void)
     gk_malloc_cleanup(0);
     return 31;
   }
+  old_address = (uintptr_t)old_mcore;
+  marker = (unsigned char *)gk_malloc(32, "workspace outer marker");
+  if (marker == NULL || !gk_sigtrap())
+    return 31;
+  memset(marker, 0x5a, 32);
   baseline = gk_GetCurMemoryUsed();
+  depth = gk_cur_jbufs;
+#ifdef METIS_TEST_POSIX_QUERY
+  if (__real_pthread_sigmask(SIG_SETMASK, NULL, &before))
+    return 31;
+#endif
 
-  for (fail=1; fail<=3; fail++) {
-    FailAllocation(fail, 1);
-    status = AllocateWorkSpace(&ctrl, &graph);
-    AllowAllocations();
-    if (status != METIS_ERROR_MEMORY || ctrl.mcore != old_mcore ||
-        gk_GetCurMemoryUsed() != baseline) {
-      FreeWorkSpace(&ctrl);
-      gk_malloc_cleanup(0);
-      return 31+(int)fail;
+  for (mode=0; mode<2; mode++) {
+    gk_set_exit_on_error(mode);
+    for (fail=1; fail<=3; fail++) {
+      ctrl.status = METIS_OK;
+      FailAllocation(fail, 1);
+      clobber_cleanup = 1;
+      initialization_failed = 0;
+      status = METIS_OK;
+      switch (gk_sigcatch()) {
+        case 0:
+          status = AllocateWorkSpace(&ctrl, &graph);
+          break;
+        default:
+          AllowAllocations();
+          clobber_cleanup = initialization_failed = 0;
+          return 34;
+      }
+      saved_errno = errno;
+      AllowAllocations();
+      clobber_cleanup = initialization_failed = 0;
+      if (status != METIS_ERROR_MEMORY || ctrl.mcore != old_mcore ||
+          saved_errno != ENOMEM || mcore_allocator_hits != 1 ||
+          mcore_allocator_calls != fail || gk_cur_jbufs != depth ||
+          marker[0] != 0x5a || marker[31] != 0x5a ||
+          gk_GetCurMemoryUsed() != baseline)
+        return 31+(int)fail;
+#ifdef METIS_TEST_POSIX_QUERY
+      if (__real_pthread_sigmask(SIG_SETMASK, NULL, &after) ||
+          !SameQueryMask(&before, &after))
+        return 34;
+#endif
+      total_hits += mcore_allocator_hits;
+      fprintf(stderr, "workspace mode %d fail %zu: hit=%zu malloc=%zu calloc=%zu\n",
+          mode, fail, mcore_allocator_hits, mcore_malloc_calls, mcore_calloc_calls);
     }
   }
 
+  ctrl.status = METIS_OK;
+  gk_set_exit_on_error(1);
   FailAllocation(4, 1);
-  status = AllocateWorkSpace(&ctrl, &graph);
+  switch (gk_sigcatch()) {
+    case 0:
+      status = AllocateWorkSpace(&ctrl, &graph);
+      break;
+    default:
+      AllowAllocations();
+      return 35;
+  }
   AllowAllocations();
-  if (status != METIS_OK || ctrl.mcore == NULL || ctrl.mcore == old_mcore ||
-      allocation_count != 3) {
+  if (status != METIS_OK || ctrl.mcore == NULL ||
+      (uintptr_t)ctrl.mcore == old_address ||
+      allocation_count != 3 || mcore_allocator_calls != 3 ||
+      mcore_allocator_hits != 0) {
     FreeWorkSpace(&ctrl);
     gk_malloc_cleanup(0);
     return 35;
   }
   FreeWorkSpace(&ctrl);
+  if (!gk_siguntrap() || gk_cur_jbufs != depth-1)
+    return 36;
+  gk_free((void **)&marker, LTERM);
   if (gk_GetCurMemoryUsed() != 0) {
     gk_malloc_cleanup(0);
     return 36;
   }
   gk_malloc_cleanup(0);
+  fprintf(stderr, "workspace real allocator: failure hits=%zu, healthy calls=%zu, modes=2\n",
+      total_hits, mcore_allocator_calls);
   return 0;
 }
 
@@ -830,6 +1030,7 @@ static int CheckRefinementFailures(void)
   ctrl_t ctrl;
   cnbr_t *old_pool;
   double *old_sqrt;
+  uintptr_t old_addresses[2];
   size_t baseline, fail;
   int status;
 
@@ -850,6 +1051,8 @@ static int CheckRefinementFailures(void)
     gk_malloc_cleanup(0);
     return 41;
   }
+  old_addresses[0] = (uintptr_t)old_pool;
+  old_addresses[1] = (uintptr_t)old_sqrt;
   baseline = gk_GetCurMemoryUsed();
 
   for (fail=1; fail<=2; fail++) {
@@ -871,8 +1074,8 @@ static int CheckRefinementFailures(void)
   status = AllocateRefinementWorkSpace(&ctrl, 4, 2);
   AllowAllocations();
   if (status != METIS_OK || ctrl.cnbrpool == NULL ||
-      ctrl.cnbrpool == old_pool || ctrl.cnbrsqrt == NULL ||
-      ctrl.cnbrsqrt == old_sqrt || ctrl.nbrpoolsize_max != 4 ||
+      (uintptr_t)ctrl.cnbrpool == old_addresses[0] || ctrl.cnbrsqrt == NULL ||
+      (uintptr_t)ctrl.cnbrsqrt == old_addresses[1] || ctrl.nbrpoolsize_max != 4 ||
       ctrl.nbrpoolsize != 2 || ctrl.nbrpoolcpos != 0 ||
       ctrl.nbrpoolreallocs != 0 || allocation_count != 2) {
     FreeWorkSpace(&ctrl);
@@ -897,6 +1100,7 @@ static int Check2WayPartitionFailures(void)
   ctrl_t ctrl;
   graph_t graph;
   idx_t *old_pwgts, *old_where, *old_bndptr, *old_bndind, *old_id, *old_ed;
+  uintptr_t old_addresses[6];
   size_t baseline, fail;
   int mode, status;
 
@@ -922,6 +1126,12 @@ static int Check2WayPartitionFailures(void)
       gk_malloc_cleanup(0);
       return 101;
     }
+    old_addresses[0] = (uintptr_t)old_pwgts;
+    old_addresses[1] = (uintptr_t)old_where;
+    old_addresses[2] = (uintptr_t)old_bndptr;
+    old_addresses[3] = (uintptr_t)old_bndind;
+    old_addresses[4] = (uintptr_t)old_id;
+    old_addresses[5] = (uintptr_t)old_ed;
     baseline = gk_GetCurMemoryUsed();
     gk_set_exit_on_error(mode);
     graph.ncon = -1;
@@ -969,9 +1179,9 @@ static int Check2WayPartitionFailures(void)
     status = Allocate2WayPartitionMemory(&ctrl, &graph);
     AllowAllocations();
     if (status != METIS_OK || allocation_count != 6 ||
-        graph.pwgts == old_pwgts || graph.where == old_where ||
-        graph.bndptr == old_bndptr || graph.bndind == old_bndind ||
-        graph.id == old_id || graph.ed == old_ed) {
+        (uintptr_t)graph.pwgts == old_addresses[0] || (uintptr_t)graph.where == old_addresses[1] ||
+        (uintptr_t)graph.bndptr == old_addresses[2] || (uintptr_t)graph.bndind == old_addresses[3] ||
+        (uintptr_t)graph.id == old_addresses[4] || (uintptr_t)graph.ed == old_addresses[5]) {
       FreeRData(&graph);
       gk_malloc_cleanup(0);
       return 108+mode*10;
@@ -997,6 +1207,7 @@ static int Check2WayNodePartitionFailures(void)
   graph_t graph;
   idx_t *old_pwgts, *old_where, *old_bndptr, *old_bndind;
   nrinfo_t *old_nrinfo;
+  uintptr_t old_addresses[5];
   size_t baseline, fail;
   int mode, status;
 
@@ -1023,6 +1234,11 @@ static int Check2WayNodePartitionFailures(void)
       gk_malloc_cleanup(0);
       return 131;
     }
+    old_addresses[0] = (uintptr_t)old_pwgts;
+    old_addresses[1] = (uintptr_t)old_where;
+    old_addresses[2] = (uintptr_t)old_bndptr;
+    old_addresses[3] = (uintptr_t)old_bndind;
+    old_addresses[4] = (uintptr_t)old_nrinfo;
     baseline = gk_GetCurMemoryUsed();
     gk_set_exit_on_error(mode);
     graph.nvtxs = -1;
@@ -1058,9 +1274,9 @@ static int Check2WayNodePartitionFailures(void)
     status = Allocate2WayNodePartitionMemory(&ctrl, &graph);
     AllowAllocations();
     if (status != METIS_OK || allocation_count != 5 ||
-        graph.pwgts == old_pwgts || graph.where == old_where ||
-        graph.bndptr == old_bndptr || graph.bndind == old_bndind ||
-        graph.nrinfo == old_nrinfo) {
+        (uintptr_t)graph.pwgts == old_addresses[0] || (uintptr_t)graph.where == old_addresses[1] ||
+        (uintptr_t)graph.bndptr == old_addresses[2] || (uintptr_t)graph.bndind == old_addresses[3] ||
+        (uintptr_t)graph.nrinfo == old_addresses[4]) {
       FreeRData(&graph);
       gk_malloc_cleanup(0);
       return 137+mode*10;
@@ -1275,6 +1491,7 @@ static int CheckKWayPartitionFailures(void)
   idx_t *old_pwgts, *old_where, *old_bndptr, *old_bndind;
   ckrinfo_t *old_ckrinfo;
   vkrinfo_t *old_vkrinfo;
+  uintptr_t old_addresses[6];
   size_t baseline, fail;
   int mode, objtype, status;
 
@@ -1313,6 +1530,12 @@ static int CheckKWayPartitionFailures(void)
         gk_malloc_cleanup(0);
         return 201;
       }
+      old_addresses[0] = (uintptr_t)old_pwgts;
+      old_addresses[1] = (uintptr_t)old_where;
+      old_addresses[2] = (uintptr_t)old_bndptr;
+      old_addresses[3] = (uintptr_t)old_bndind;
+      old_addresses[4] = (uintptr_t)old_ckrinfo;
+      old_addresses[5] = (uintptr_t)old_vkrinfo;
       baseline = gk_GetCurMemoryUsed();
       gk_set_exit_on_error(mode);
 
@@ -1377,13 +1600,13 @@ static int CheckKWayPartitionFailures(void)
       status = AllocateKWayPartitionMemory(&ctrl, &graph);
       AllowAllocations();
       if (status != METIS_OK || allocation_count != 5 ||
-          graph.pwgts == old_pwgts || graph.where == old_where ||
-          graph.bndptr == old_bndptr || graph.bndind == old_bndind ||
-          graph.ckrinfo == old_ckrinfo ||
+          (uintptr_t)graph.pwgts == old_addresses[0] || (uintptr_t)graph.where == old_addresses[1] ||
+          (uintptr_t)graph.bndptr == old_addresses[2] || (uintptr_t)graph.bndind == old_addresses[3] ||
+          (uintptr_t)graph.ckrinfo == old_addresses[4] ||
           (objtype == METIS_OBJTYPE_CUT && graph.vkrinfo != NULL) ||
           (objtype == METIS_OBJTYPE_VOL &&
            ((void *)graph.ckrinfo != (void *)graph.vkrinfo ||
-            graph.vkrinfo == old_vkrinfo))) {
+            (uintptr_t)graph.vkrinfo == old_addresses[5]))) {
         FreeRData(&graph);
         gk_malloc_cleanup(0);
         return 210+mode*20+objtype*10;
@@ -1401,10 +1624,1112 @@ static int CheckKWayPartitionFailures(void)
 }
 
 
-int main(void)
+/*************************************************************************/
+/*! Checks initialization failure through the linked public k-way entry point.
+    Returned recursive errors are injected at an API boundary; the final case
+    also executes the real recursive API with a failing control allocation. */
+/*************************************************************************/
+static int CheckKWayInitializationFailure(int failure, int mode, int objtype)
+{
+  int errors[] = {METIS_ERROR_MEMORY, METIS_ERROR_MEMORY,
+                 METIS_ERROR_INPUT, METIS_ERROR};
+  idx_t nvtxs=4, ncon=2, nparts=2, objval=-9;
+  idx_t xadj[] = {1, 3, 5, 7, 9};
+  idx_t adjncy[] = {2, 4, 1, 3, 2, 4, 1, 3};
+  idx_t old_xadj[5], old_adjncy[8], vwgt[] = {1, 1, 1, 1, 1, 1, 1, 1};
+  idx_t part[4], options[METIS_NOPTIONS];
+  int status, expected, old_depth;
+
+  memcpy(old_xadj, xadj, sizeof(xadj));
+  memcpy(old_adjncy, adjncy, sizeof(adjncy));
+  METIS_SetDefaultOptions(options);
+  options[METIS_OPTION_NUMBERING] = 1;
+  options[METIS_OPTION_NCUTS] = 2;
+  options[METIS_OPTION_OBJTYPE] = objtype;
+  iset(4, -9, part);
+  old_depth = gk_cur_jbufs;
+  recursive_calls = in_recursive = initialization_failed = 0;
+  allocations_after_failure = 0;
+  fail_recursive_allocation = failure == 4;
+  recursive_status = failure > 0 && failure < 4 ? errors[failure] : METIS_OK;
+  expected = failure < 4 ? errors[failure] : METIS_ERROR_MEMORY;
+  if (failure == 0)
+    FailMessage("InitKWayPartitioning: ubvec");
+  gk_set_exit_on_error(mode);
+  status = METIS_PartGraphKway(&nvtxs, &ncon, xadj, adjncy, vwgt, NULL,
+      NULL, &nparts, NULL, NULL, options, &objval, part);
+  AllowAllocations();
+  fail_recursive_allocation = 0;
+  recursive_status = METIS_OK;
+  initialization_failed = 0;
+  in_recursive = 0;
+  gk_set_exit_on_error(1);
+  if (status != expected || allocations_after_failure != 0 ||
+      recursive_calls != (failure == 0 ? 0 : 1) ||
+      memcmp(xadj, old_xadj, sizeof(xadj)) != 0 ||
+      memcmp(adjncy, old_adjncy, sizeof(adjncy)) != 0 ||
+      options[METIS_OPTION_NUMBERING] != 1 || gk_cur_jbufs != old_depth ||
+      gk_GetCurMemoryUsed() != 0) {
+    fprintf(stderr, "k-way failure %d mode %d: status %d, recursive calls %d, later allocations %zu\n",
+        failure, mode, status, recursive_calls, allocations_after_failure);
+    return 1;
+  }
+  status = METIS_PartGraphKway(&nvtxs, &ncon, xadj, adjncy, vwgt, NULL,
+      NULL, &nparts, NULL, NULL, options, &objval, part);
+  if (status != METIS_OK || objval < 0 ||
+      memcmp(xadj, old_xadj, sizeof(xadj)) != 0 ||
+      memcmp(adjncy, old_adjncy, sizeof(adjncy)) != 0 ||
+      gk_cur_jbufs != old_depth || gk_GetCurMemoryUsed() != 0)
+    return 2;
+  return 0;
+}
+
+
+static int CheckKWayInitializationFailures(void)
+{
+  ctrl_t ctrl;
+  graph_t graph;
+  int failure, mode, objtype;
+
+  for (mode=0; mode<2; mode++) {
+    for (objtype=METIS_OBJTYPE_CUT; objtype<=METIS_OBJTYPE_VOL; objtype++) {
+      for (failure=0; failure<5; failure++) {
+        if (CheckKWayInitializationFailure(failure, mode, objtype) != 0)
+          return 1;
+      }
+    }
+  }
+  memset(&ctrl, 0, sizeof(ctrl));
+  InitGraph(&graph);
+  ctrl.status = METIS_ERROR_INPUT;
+  FailAllocation(SIZE_MAX, 0);
+  InitKWayPartitioning(&ctrl, &graph);
+  AllowAllocations();
+  return ctrl.status == METIS_ERROR_INPUT && allocation_count == 0 ? 0 : 2;
+}
+
+
+#ifdef METIS_TEST_POSIX_QUERY
+static int query_armed, query_hits, query_depth, query_error;
+static int query_caller_depth, query_max_depth;
+static size_t query_count, query_fail_at;
+
+int __real_pthread_sigmask(int, const sigset_t *, sigset_t *);
+
+
+/* Inject the producer's query return status without setting consumer errno. */
+int __wrap_pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset)
+{
+  if (query_armed && set == NULL && oldset != NULL &&
+      gk_cur_jbufs-query_caller_depth > query_max_depth)
+    query_max_depth = gk_cur_jbufs-query_caller_depth;
+  if (query_armed && set == NULL && oldset != NULL &&
+      gk_cur_jbufs == query_depth && ++query_count == query_fail_at) {
+    query_armed = 0;
+    query_hits++;
+    initialization_failed = 1;
+    return query_error;
+  }
+  return __real_pthread_sigmask(how, set, oldset);
+}
+
+
+static int SameQueryMask(const sigset_t *left, const sigset_t *right)
+{
+  int signum;
+
+  for (signum=1; signum<=SIGRTMAX; signum++) {
+    if (sigismember(left, signum) != sigismember(right, signum))
+      return 0;
+  }
+  return 1;
+}
+#endif
+
+
+/*************************************************************************/
+/*! Uses real heap scratch releases in the large-graph cleanup checks. */
+/*************************************************************************/
+gk_mcore_t *__wrap_gk_mcoreCreate(size_t coresize)
+{
+  gk_mcore_t *mcore;
+
+  in_mcore_create = fail_nosignal;
+  mcore = __real_gk_mcoreCreate(heap_workspace ? 0 : coresize);
+  in_mcore_create = 0;
+  if (heap_workspace) {
+    heap_workspace_hits++;
+    if (mcore != NULL && mcore->coresize != 0)
+      heap_workspace_invalid = 1;
+  }
+  return mcore;
+}
+
+
+void __wrap_gk_mcorePop(gk_mcore_t *mcore)
+{
+  heap_pop_active++;
+  __real_gk_mcorePop(mcore);
+  heap_pop_active--;
+}
+
+
+/*************************************************************************/
+/*! Exercises the multi-separator and large-graph node bisection paths. */
+/*************************************************************************/
+static int RunLargeNodeAPI(void)
+{
+  static idx_t xadj[5001], adjncy[10000], perm[5000], iperm[5000];
+  idx_t nvtxs=5000, options[METIS_NOPTIONS], i;
+  int status, saved_errno;
+
+  for (i=0; i<nvtxs; i++) {
+    xadj[i] = 2*i;
+    adjncy[2*i] = (i+nvtxs-1)%nvtxs;
+    adjncy[2*i+1] = (i+1)%nvtxs;
+  }
+  xadj[nvtxs] = 2*nvtxs;
+  METIS_SetDefaultOptions(options);
+  options[METIS_OPTION_COMPRESS] = 0;
+  options[METIS_OPTION_NSEPS] = 2;
+  /* Force heap-backed scratch so workspace pops exercise real releases. */
+  heap_workspace_hits = 0;
+  heap_workspace_invalid = 0;
+  heap_workspace = 1;
+  status = METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options, perm, iperm);
+  saved_errno = errno;
+  heap_workspace = 0;
+  if (heap_workspace_invalid || (status == METIS_OK && heap_workspace_hits == 0))
+    status = METIS_ERROR_INPUT;
+  for (i=0; i<nvtxs; i++) {
+    if (xadj[i] != 2*i || adjncy[2*i] != (i+nvtxs-1)%nvtxs ||
+        adjncy[2*i+1] != (i+1)%nvtxs ||
+        (status == METIS_OK && (perm[i] < 0 || perm[i] >= nvtxs ||
+         iperm[perm[i]] != i)))
+      status = METIS_ERROR_INPUT;
+  }
+  if (xadj[nvtxs] != 2*nvtxs)
+    status = METIS_ERROR_INPUT;
+  errno = saved_errno;
+  return status;
+}
+
+
+static int RunQueryAPI(int api, int objtype, int debug)
+{
+  idx_t nvtxs=4, ncon=query_ncon, nparts=2, options[METIS_NOPTIONS], obj=-9;
+  idx_t weights[]={1, 2, 2, 1, 1, 2, 2, 1};
+  idx_t xadj[]={1, 3, 5, 7, 9}, adjncy[]={2, 4, 1, 3, 2, 4, 1, 3};
+  idx_t part[8], iperm[4], ne=2, nn=3, numflag=1, common=1;
+  idx_t vxadj[]={1, 3, 5, 7, 9, 11, 13, 15, 17};
+  idx_t vadjncy[]={2, 8, 1, 3, 2, 4, 3, 5, 4, 6, 5, 7, 6, 8, 7, 1};
+  idx_t eptr[]={1, 3, 5}, eind[]={1, 2, 2, 3}, epart[2], npart[3];
+  idx_t pxadj[]={0, 2, 4, 6, 8}, padjncy[]={1, 3, 0, 2, 1, 3, 0, 2};
+  idx_t hmarker[]={-1, -1, -1, -1}, refined[]={0, 2, 1, 2}, sizes[3];
+  idx_t *mxadj=NULL, *madjncy=NULL;
+  int status;
+
+  if (api == 10)
+    return RunLargeNodeAPI();
+  METIS_SetDefaultOptions(options);
+  options[METIS_OPTION_NUMBERING] = 1;
+  options[METIS_OPTION_CONTIG] = 1;
+  options[METIS_OPTION_MINCONN] = query_minconn;
+  if (query_edge_separator)
+    options[METIS_OPTION_IPTYPE] = METIS_IPTYPE_EDGE;
+  if (api != 2 && api < 7)
+    options[METIS_OPTION_OBJTYPE] = objtype;
+  if (api >= 7) {
+    options[METIS_OPTION_NUMBERING] = 0;
+    options[METIS_OPTION_OBJTYPE] = METIS_OBJTYPE_NODE;
+  }
+  options[METIS_OPTION_DBGLVL] = debug;
+  /* Use a ring that retains both contiguous parts in the volume objective. */
+  if (api == 0 && objtype == METIS_OBJTYPE_VOL)
+    nvtxs = 8;
+  if (api == 0)
+    status = METIS_PartGraphKway(&nvtxs, &ncon,
+        nvtxs == 8 ? vxadj : xadj, nvtxs == 8 ? vadjncy : adjncy,
+        ncon == 2 ? weights : NULL,
+        NULL, NULL, &nparts, NULL, NULL, options, &obj, part);
+  else if (api == 1)
+    status = METIS_PartGraphRecursive(&nvtxs, &ncon, xadj, adjncy,
+        ncon == 2 ? weights : NULL,
+        NULL, NULL, &nparts, NULL, NULL, options, &obj, part);
+  else if (api == 2)
+    status = METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options, part, iperm);
+  else if (api == 3)
+    status = METIS_MeshToNodal(&ne, &nn, eptr, eind, &numflag,
+        &mxadj, &madjncy);
+  else if (api == 4)
+    status = METIS_MeshToDual(&ne, &nn, eptr, eind, &common, &numflag,
+        &mxadj, &madjncy);
+  else if (api == 5)
+    status = METIS_PartMeshNodal(&ne, &nn, eptr, eind, NULL, NULL,
+        &nparts, NULL, options, &obj, epart, npart);
+  else if (api == 6)
+    status = METIS_PartMeshDual(&ne, &nn, eptr, eind, NULL, NULL,
+        &common, &nparts, NULL, options, &obj, epart, npart);
+  else if (api == 7)
+    status = METIS_NodeNDP(nvtxs, pxadj, padjncy, NULL, 2, options,
+        part, iperm, sizes);
+  else if (api == 8)
+    status = METIS_ComputeVertexSeparator(&nvtxs, pxadj, padjncy,
+        NULL, options, &obj, part);
+  else
+    status = METIS_NodeRefine(nvtxs, pxadj, NULL, padjncy,
+        refined, hmarker, (real_t)1.05);
+
+  /* Preserve errno before checking input restoration or releasing outputs. */
+  {
+    int saved_errno = errno;
+    idx_t old_xadj[]={1, 3, 5, 7, 9}, old_adjncy[]={2, 4, 1, 3, 2, 4, 1, 3};
+    idx_t old_eptr[]={1, 3, 5}, old_eind[]={1, 2, 2, 3};
+    idx_t old_vxadj[]={1, 3, 5, 7, 9, 11, 13, 15, 17};
+    idx_t old_vadjncy[]={2, 8, 1, 3, 2, 4, 3, 5, 4, 6, 5, 7, 6, 8, 7, 1};
+    idx_t old_pxadj[]={0, 2, 4, 6, 8}, old_padjncy[]={1, 3, 0, 2, 1, 3, 0, 2};
+    idx_t i, j, separator=0;
+    if (memcmp(xadj, old_xadj, sizeof(xadj)) ||
+        memcmp(adjncy, old_adjncy, sizeof(adjncy)) ||
+        memcmp(vxadj, old_vxadj, sizeof(vxadj)) ||
+        memcmp(vadjncy, old_vadjncy, sizeof(vadjncy)) ||
+        memcmp(eptr, old_eptr, sizeof(eptr)) ||
+        memcmp(eind, old_eind, sizeof(eind)) ||
+        memcmp(pxadj, old_pxadj, sizeof(pxadj)) ||
+        memcmp(padjncy, old_padjncy, sizeof(padjncy)) ||
+        options[METIS_OPTION_NUMBERING] != (api < 7 ? 1 : 0) || numflag != 1 ||
+        ((api == 3 || api == 4) && status != METIS_OK &&
+         (mxadj != NULL || madjncy != NULL)))
+      status = METIS_ERROR_INPUT;
+    if (status == METIS_OK && api == 7) {
+      for (i=0; i<nvtxs; i++) {
+        if (part[i] < 0 || part[i] >= nvtxs || iperm[part[i]] != i)
+          status = METIS_ERROR_INPUT;
+      }
+    }
+    if (status == METIS_OK && api >= 8) {
+      idx_t *where = api == 8 ? part : refined;
+      for (i=0; i<nvtxs; i++) {
+        if (where[i] < 0 || where[i] > 2)
+          status = METIS_ERROR_INPUT;
+        separator += where[i] == 2;
+        for (j=pxadj[i]; j<pxadj[i+1]; j++) {
+          if (where[i] != 2 && where[padjncy[j]] != 2 &&
+              where[i] != where[padjncy[j]])
+            status = METIS_ERROR_INPUT;
+        }
+      }
+      if (api == 8 && separator != obj)
+        status = METIS_ERROR_INPUT;
+    }
+    METIS_Free(mxadj);
+    METIS_Free(madjncy);
+    errno = saved_errno;
+  }
+  return status;
+}
+
+
+/*************************************************************************/
+/*! Checks first-error preservation even when successful free changes errno. */
+/*************************************************************************/
+static int CheckFrameCleanup(int api, int objtype, int debug, size_t nth,
+    int mode, int error, size_t *observed, size_t *clobbers)
+{
+  unsigned char *marker;
+  size_t baseline;
+  volatile int status=METIS_ERROR;
+  int depth, saved_errno, expected, result=0;
+
+  AllowAllocations();
+  initialization_failed = 0;
+  if (!gk_malloc_init())
+    return 1;
+  marker = (unsigned char *)gk_malloc(32, "frame cleanup marker");
+  if (marker == NULL || !gk_sigtrap())
+    return 2;
+  memset(marker, 0x5a, 32);
+  baseline = gk_GetCurMemoryUsed();
+  depth = gk_cur_jbufs;
+  trap_count = trap_hits = cleanup_clobbers = 0;
+  heap_pop_clobbers = 0;
+  trap_fail_at = nth;
+  trap_error = error;
+  trap_armed = 1;
+  clobber_cleanup = nth != SIZE_MAX;
+  allocations_after_failure = 0;
+  errno = 0;
+  gk_set_exit_on_error(mode);
+  switch (gk_sigcatch()) {
+    case 0:
+      status = RunQueryAPI(api, objtype, debug);
+      break;
+    default:
+      /* The public entry must catch its own errors inside this live frame. */
+      result = 3;
+      break;
+  }
+  saved_errno = errno;
+  trap_armed = clobber_cleanup = initialization_failed = heap_workspace = 0;
+  heap_pop_active = 0;
+  *observed = trap_count;
+  *clobbers = cleanup_clobbers;
+  expected = nth == SIZE_MAX ? METIS_OK :
+      (error == ENOMEM || error == EOVERFLOW ? METIS_ERROR_MEMORY : METIS_ERROR);
+  if (result == 0 && (status != expected ||
+      trap_hits != (nth == SIZE_MAX ? 0 : 1) ||
+      (nth != SIZE_MAX && saved_errno != error) ||
+      allocations_after_failure != 0 || gk_cur_jbufs != depth ||
+      gk_GetCurMemoryUsed() != baseline || marker[0] != 0x5a ||
+      marker[31] != 0x5a))
+    result = 4;
+  if (result == 0 && RunQueryAPI(api, objtype, debug) != METIS_OK)
+    result = 5;
+  if (gk_cur_jbufs != depth || gk_GetCurMemoryUsed() != baseline ||
+      !gk_siguntrap())
+    result = 6;
+  gk_free((void **)&marker, LTERM);
+  gk_malloc_cleanup(0);
+  gk_set_exit_on_error(1);
+  if (result != 0)
+    fprintf(stderr, "frame cleanup API %d nth %zu mode %d obj %d debug %d: status %d errno %d expected %d/%d hits %d frees %zu result %d\n",
+        api, nth, mode, objtype, debug, status, saved_errno,
+        expected, error, trap_hits, cleanup_clobbers, result);
+  return result;
+}
+
+
+static int CheckFrameCleanupFailures(void)
+{
+  int errors[] = {EIO, ENOMEM, EOVERFLOW};
+  int api, mode, variant, objtype, debug;
+  size_t error, total, nth, observed, clobbers, cases=0, frees=0;
+
+  for (api=0; api<10; api++) {
+    for (variant=0; variant<(api == 0 ? 6 : (api == 1 || api == 2 ? 2 : 1)); variant++) {
+      query_ncon = (api == 0 && variant == 3) ||
+          (api == 1 && variant == 1) ? 2 : 1;
+      query_edge_separator = api == 2 && variant == 1;
+      query_minconn = api == 0 && variant == 5;
+      objtype = api == 0 && (variant == 1 || variant == 5) ?
+          METIS_OBJTYPE_VOL : METIS_OBJTYPE_CUT;
+      debug = api == 0 && variant == 2 ? METIS_DBG_REFINE :
+          (api == 0 && variant == 4 ? METIS_DBG_TIME : 0);
+      if (CheckFrameCleanup(api, objtype, debug, SIZE_MAX, 0, EIO,
+          &total, &clobbers) != 0 || total == 0)
+        return 1;
+      for (nth=1; nth<=total; nth++) {
+        for (mode=0; mode<2; mode++) {
+          for (error=0; error<sizeof(errors)/sizeof(errors[0]); error++) {
+            if (CheckFrameCleanup(api, objtype, debug, nth, mode,
+                errors[error], &observed, &clobbers) != 0)
+              return 2;
+            frees += clobbers;
+            cases++;
+          }
+        }
+      }
+    }
+  }
+  printf("Controlled frame cleanup cases: %zu, errno-clobbering frees: %zu\n",
+      cases, frees);
+  return cases != 0 && frees != 0 ? 0 : 3;
+}
+
+
+static int CheckLargeFrameCleanupFailures(void)
+{
+  int errors[] = {EIO, ENOMEM, EOVERFLOW};
+  int mode;
+  size_t error, total, positions[8], i, observed, clobbers, frees=0, pops=0;
+
+  if (CheckFrameCleanup(10, METIS_OBJTYPE_NODE, 0, SIZE_MAX, 0, EIO,
+      &total, &clobbers) != 0 || total < 12)
+    return 1;
+  /* Bound the run time while visiting several nested construction depths. */
+  positions[0] = 8;
+  positions[1] = 9;
+  positions[2] = 10;
+  positions[3] = 11;
+  positions[4] = total/3;
+  positions[5] = total/2;
+  positions[6] = 2*total/3;
+  positions[7] = total-1;
+  for (i=0; i<sizeof(positions)/sizeof(positions[0]); i++) {
+    for (mode=0; mode<2; mode++) {
+      for (error=0; error<sizeof(errors)/sizeof(errors[0]); error++) {
+        if (CheckFrameCleanup(10, METIS_OBJTYPE_NODE, 0, positions[i],
+            mode, errors[error], &observed, &clobbers) != 0)
+          return 2;
+        frees += clobbers;
+        pops += heap_pop_clobbers;
+      }
+    }
+  }
+  printf("Large-graph frame cleanup cases: 48, errno-clobbering frees: %zu, heap pop frees: %zu\n",
+      frees, pops);
+  return frees != 0 && pops != 0 ? 0 : 3;
+}
+
+
+#ifdef METIS_TEST_POSIX_QUERY
+static int CheckQueryAPI(int api, int relative_depth, size_t nth,
+    int mode, int error, int objtype, int debug, size_t *observed)
+{
+  unsigned char *marker;
+  size_t baseline;
+  int depth, status, saved_errno, expected, result=0;
+  sigset_t before, after;
+
+  AllowAllocations();
+  initialization_failed = 0;
+  if (!gk_malloc_init())
+    return 1;
+  marker = (unsigned char *)gk_malloc(32, "query API marker");
+  if (marker == NULL || !gk_sigtrap())
+    return 2;
+  memset(marker, 0x5a, 32);
+  baseline = gk_GetCurMemoryUsed();
+  depth = gk_cur_jbufs;
+  if (__real_pthread_sigmask(SIG_SETMASK, NULL, &before))
+    return 3;
+  query_count = query_hits = 0;
+  query_caller_depth = depth;
+  query_max_depth = 0;
+  query_depth = depth+relative_depth;
+  query_fail_at = nth;
+  query_error = error;
+  query_armed = 1;
+  allocations_after_failure = 0;
+  errno = 0;
+  gk_set_exit_on_error(mode);
+  switch (gk_sigcatch()) {
+    case 0:
+      status = RunQueryAPI(api, objtype, debug);
+      break;
+    default:
+      /* A public API must recover its own error, leaving this caller alive. */
+      return 4;
+  }
+  saved_errno = errno;
+  query_armed = 0;
+  initialization_failed = 0;
+  *observed = query_count;
+  expected = nth == SIZE_MAX ? METIS_OK :
+      (error == ENOMEM || error == EOVERFLOW ? METIS_ERROR_MEMORY : METIS_ERROR);
+  if (__real_pthread_sigmask(SIG_SETMASK, NULL, &after) ||
+      status != expected || query_hits != (nth == SIZE_MAX ? 0 : 1) ||
+      (nth != SIZE_MAX && saved_errno != error) ||
+      allocations_after_failure != 0 ||
+      gk_cur_jbufs != depth || !SameQueryMask(&before, &after) ||
+      gk_GetCurMemoryUsed() != baseline || marker[0] != 0x5a ||
+      marker[31] != 0x5a)
+    result = 5;
+  if (result == 0 && RunQueryAPI(api, objtype, debug) != METIS_OK)
+    result = 6;
+  if (gk_cur_jbufs != depth || gk_GetCurMemoryUsed() != baseline ||
+      !gk_siguntrap())
+    result = 7;
+  gk_free((void **)&marker, LTERM);
+  gk_malloc_cleanup(0);
+  gk_set_exit_on_error(1);
+  if (result != 0)
+    fprintf(stderr, "query API %d depth %d nth %zu mode %d obj %d debug %d: status %d errno %d hits %d result %d\n",
+        api, relative_depth, nth, mode, objtype, debug, status,
+        saved_errno, query_hits, result);
+  return result;
+}
+
+
+static int CheckQueryFailures(void)
+{
+  int errors[] = {EIO, ENOMEM, EOVERFLOW};
+  int api, depth, max_depth, mode, variant, objtype, debug;
+  size_t total, nth, error, observed, cases=0;
+
+  /* Calibrate all observed depths, then fail queries on the same input. */
+  for (api=0; api<10; api++) {
+    for (variant=0; variant<(api == 0 ? 6 : (api == 1 || api == 2 ? 2 : 1)); variant++) {
+      query_ncon = (api == 0 && variant == 3) ||
+          (api == 1 && variant == 1) ? 2 : 1;
+      query_edge_separator = api == 2 && variant == 1;
+      query_minconn = api == 0 && variant == 5;
+      objtype = api == 0 && (variant == 1 || variant == 5) ?
+          METIS_OBJTYPE_VOL : METIS_OBJTYPE_CUT;
+      debug = api == 0 && variant == 2 ? METIS_DBG_REFINE :
+          (api == 0 && variant == 4 ? METIS_DBG_TIME : 0);
+      if (CheckQueryAPI(api, 0, SIZE_MAX, 0, EIO, objtype, debug,
+          &total) != 0 || total == 0)
+        return 1;
+      max_depth = query_max_depth;
+      printf("POSIX query API %d variant %d ncon %d obj %d debug %d maximum relative depth: %d\n",
+          api, variant, query_ncon, objtype, debug, max_depth);
+      for (depth=0; depth<=max_depth; depth++) {
+        if (CheckQueryAPI(api, depth, SIZE_MAX, 0, EIO, objtype, debug,
+            &total) != 0)
+          return 1;
+        for (nth=1; nth<=total; nth++) {
+          for (mode=0; mode<2; mode++) {
+            for (error=0; error<sizeof(errors)/sizeof(errors[0]); error++) {
+              if (CheckQueryAPI(api, depth, nth, mode, errors[error],
+                  objtype, debug, &observed) != 0)
+                return 2;
+              cases++;
+            }
+          }
+        }
+      }
+    }
+  }
+  printf("POSIX query failure cases: %zu\n", cases);
+  return cases != 0 ? 0 : 3;
+}
+
+
+/* Static objects retain their owned pointers across the caller's jump. */
+static int CheckQueryResize(int kind, int mode, int error)
+{
+  static ctrl_t ctrl;
+  static graph_t graph, coarse;
+  static idx_t *adids[2], *adwgts[2], maxnads[2], nads[2];
+  idx_t *old_first, *old_second;
+  size_t baseline;
+  sigset_t before, after;
+  volatile int caught=0;
+  int depth, saved_errno, expected, result=0, i;
+
+  AllowAllocations();
+  if (!gk_malloc_init())
+    return 1;
+  memset(&ctrl, 0, sizeof(ctrl));
+  memset(&graph, 0, sizeof(graph));
+  memset(&coarse, 0, sizeof(coarse));
+  ctrl.status = METIS_OK;
+  if (kind != 1) {
+    graph.nedges = 20000;
+    coarse.nedges = 10001;
+    coarse.adjncy = ismalloc(20000, 17, "query resize adjacency");
+    coarse.adjwgt = ismalloc(20000, 23, "query resize weights");
+    if (coarse.adjncy == NULL || coarse.adjwgt == NULL)
+      return 2;
+    old_first = coarse.adjncy;
+    old_second = coarse.adjwgt;
+  }
+  else {
+    for (i=0; i<2; i++) {
+      adids[i] = ismalloc(1, i, "query resize subdomain ids");
+      adwgts[i] = ismalloc(1, 1, "query resize subdomain weights");
+      if (adids[i] == NULL || adwgts[i] == NULL)
+        return 3;
+      nads[i] = maxnads[i] = 1;
+    }
+    ctrl.nparts = 2;
+    ctrl.adids = adids;
+    ctrl.adwgts = adwgts;
+    ctrl.maxnads = maxnads;
+    ctrl.nads = nads;
+    old_first = adids[0];
+    old_second = adwgts[0];
+  }
+  baseline = gk_GetCurMemoryUsed();
+  if (!gk_sigtrap() ||
+      __real_pthread_sigmask(SIG_SETMASK, NULL, &before))
+    return 4;
+  depth = gk_cur_jbufs;
+  query_depth = depth;
+  query_count = query_hits = 0;
+  query_fail_at = 1;
+  query_error = error;
+  query_armed = 1;
+  errno = 0;
+  gk_set_exit_on_error(mode);
+  switch (gk_sigcatch()) {
+    case 0:
+      if (kind != 1)
+        ReAdjustMemory(kind == 2 ? NULL : &ctrl, &graph, &coarse);
+      else
+        UpdateEdgeSubDomainGraph(&ctrl, 0, 1, 1, NULL);
+      break;
+    case SIGMEM:
+      caught = SIGMEM;
+      break;
+    default:
+      caught = SIGERR;
+      break;
+  }
+  saved_errno = errno;
+  query_armed = 0;
+  initialization_failed = 0;
+  expected = error == ENOMEM || error == EOVERFLOW ? SIGMEM : SIGERR;
+  if (__real_pthread_sigmask(SIG_SETMASK, NULL, &after) ||
+      query_hits != 1 || saved_errno != error || gk_cur_jbufs != depth ||
+      !SameQueryMask(&before, &after) || gk_GetCurMemoryUsed() != baseline ||
+      caught != (mode ? expected : 0) ||
+      (!mode && kind != 2 && ctrl.status != metis_rcode(expected)))
+    result = 5;
+  if (kind != 1) {
+    if (coarse.adjncy != old_first || coarse.adjwgt != old_second ||
+        coarse.adjncy[0] != 17 || coarse.adjncy[19999] != 17 ||
+        coarse.adjwgt[0] != 23)
+      result = 6;
+  }
+  else if (adids[0] != old_first || adwgts[0] != old_second ||
+      nads[0] != 1 || maxnads[0] != 1 ||
+      adids[0][0] != 0 || adwgts[0][0] != 1)
+    result = 7;
+
+  if (result == 0) {
+    ctrl.status = METIS_OK;
+    if (kind != 1) {
+      ReAdjustMemory(kind == 2 ? NULL : &ctrl, &graph, &coarse);
+      if (ctrl.status != METIS_OK || coarse.adjncy[0] != 17 ||
+          coarse.adjncy[10000] != 17 || coarse.adjwgt[10000] != 23)
+        result = 8;
+    }
+    else {
+      UpdateEdgeSubDomainGraph(&ctrl, 0, 1, 1, NULL);
+      if (ctrl.status != METIS_OK || nads[0] != 2 || nads[1] != 2)
+        result = 9;
+    }
+  }
+  if (!gk_siguntrap() || gk_cur_jbufs != depth-1)
+    result = 10;
+  gk_malloc_cleanup(0);
+  gk_set_exit_on_error(1);
+  if (result != 0)
+    fprintf(stderr, "query resize kind %d mode %d errno %d expected %d hits %d result %d\n",
+        kind, mode, saved_errno, error, query_hits, result);
+  return result;
+}
+
+
+static int CheckQueryResizeFailures(void)
+{
+  int errors[] = {EIO, ENOMEM, EOVERFLOW};
+  int kind, mode;
+  size_t error;
+
+  for (kind=0; kind<3; kind++) {
+    for (mode=0; mode<2; mode++) {
+      for (error=0; error<sizeof(errors)/sizeof(errors[0]); error++) {
+        if (CheckQueryResize(kind, mode, errors[error]) != 0)
+          return 1;
+      }
+    }
+  }
+  return 0;
+}
+#endif
+
+
+/*************************************************************************/
+/*! Preserves a returned scratch error through real queue and heap releases. */
+/*************************************************************************/
+static int CheckScratchCleanupFailures(void)
+{
+  static ctrl_t ctrl;
+  static graph_t graph;
+  static idx_t xadj[]={0, 2, 4, 6, 8}, adjncy[]={1, 3, 0, 2, 1, 3, 0, 2};
+  static idx_t old_xadj[5], old_adjncy[8], pwgts[]={4, 0, 0}, order[4];
+  static idx_t hmarker[]={-1, -1, -1, -1};
+  static real_t targets[]={0.5, 0.5}, factors[]={1.03, 1.03};
+  static idx_t tvwgt[]={4, 4}, vwgt[]={1, 1, 1, 1, 1, 1, 1, 1};
+  unsigned char *marker;
+  size_t baseline;
+  int kind, depth, saved_errno, result=0;
+  volatile int caught=0;
+
+  if (!gk_malloc_init())
+    return 1;
+  marker = (unsigned char *)gk_malloc(32, "scratch cleanup marker");
+  if (marker == NULL || !gk_sigtrap())
+    return 2;
+  memset(marker, 0x5a, 32);
+  baseline = gk_GetCurMemoryUsed();
+  depth = gk_cur_jbufs;
+  memcpy(old_xadj, xadj, sizeof(xadj));
+  memcpy(old_adjncy, adjncy, sizeof(adjncy));
+  gk_set_exit_on_error(0);
+  for (kind=0; kind<9; kind++) {
+    memset(&ctrl, 0, sizeof(ctrl));
+    InitGraph(&graph);
+    ctrl.status = METIS_OK;
+    ctrl.mcore = gk_mcoreCreate(0);
+    if (ctrl.mcore == NULL)
+      return 3;
+    graph.nvtxs = 4;
+    graph.ncon = kind == 8 ? 2 : 1;
+    graph.vwgt = vwgt;
+    graph.tvwgt = tvwgt;
+    ctrl.ubfactors = factors;
+    graph.xadj = xadj;
+    graph.adjncy = adjncy;
+    graph.pwgts = pwgts;
+    graph.mincut = 0;
+    clobber_cleanup = 1;
+    cleanup_clobbers = 0;
+    initialization_failed = 0;
+    allocations_after_failure = 0;
+    caught = 0;
+    FailMcoreAllocation(2);
+    errno = 0;
+    switch (gk_sigcatch()) {
+      case 0:
+        if (kind == 0)
+          MMDOrder(&ctrl, &graph, order, 4);
+        else if (kind == 1)
+          FM_2WayNodeRefine1SidedP(&ctrl, &graph, hmarker, 1.03, 1);
+        else if (kind == 2)
+          Bnd2WayBalance(&ctrl, &graph, targets);
+        else if (kind == 3)
+          FM_2WayNodeRefine2Sided(&ctrl, &graph, 1);
+        else if (kind == 4)
+          FM_2WayNodeRefine1Sided(&ctrl, &graph, 1);
+        else if (kind == 5)
+          FM_2WayNodeBalance(&ctrl, &graph);
+        else if (kind == 6)
+          FM_2WayNodeRefine2SidedP(&ctrl, &graph, hmarker, 1.03, 1);
+        else if (kind == 7)
+          General2WayBalance(&ctrl, &graph, targets);
+        else
+          McGeneral2WayBalance(&ctrl, &graph, targets);
+        break;
+      default:
+        caught = 1;
+        break;
+    }
+    saved_errno = errno;
+    AllowAllocations();
+    clobber_cleanup = initialization_failed = 0;
+    if (caught || saved_errno != ENOMEM || cleanup_clobbers == 0 ||
+        allocations_after_failure != 0 || mcore_count != 2 ||
+        ctrl.status != METIS_ERROR_MEMORY || gk_cur_jbufs != depth ||
+        ctrl.mcore->cmop != 0 || ctrl.mcore->cur_hallocs != 0 ||
+        memcmp(xadj, old_xadj, sizeof(xadj)) != 0 ||
+        memcmp(adjncy, old_adjncy, sizeof(adjncy)) != 0) {
+      fprintf(stderr, "scratch cleanup kind %d: errno %d, frees %zu, status %d, allocations %zu, after-failure %zu\n",
+          kind, saved_errno, cleanup_clobbers, ctrl.status, mcore_count,
+          allocations_after_failure);
+      result = 1;
+    }
+    fprintf(stderr, "scratch case %d: errno %d, frees %zu, status %d, allocations %zu, after-failure %zu\n",
+        kind, saved_errno, cleanup_clobbers, ctrl.status, mcore_count,
+        allocations_after_failure);
+    gk_mcoreDestroy(&ctrl.mcore, 0);
+    if (gk_GetCurMemoryUsed() != baseline || marker[0] != 0x5a ||
+        marker[31] != 0x5a || RunQueryAPI(kind == 1 ? 9 : 2,
+          METIS_OBJTYPE_CUT, 0) != METIS_OK)
+      result = 1;
+  }
+  if (!gk_siguntrap() || gk_cur_jbufs != depth-1)
+    result = 1;
+  gk_free((void **)&marker, LTERM);
+  gk_malloc_cleanup(0);
+  gk_set_exit_on_error(1);
+  return result;
+}
+
+
+/*************************************************************************/
+/*! Exercises scratch cleanup using real graph and partition constructors. */
+/*************************************************************************/
+static int CheckPreparedScratchFailures(void)
+{
+  static const int kinds[]={0, 1, 1, 2, 3, 4, 5, 6, 6, 6,
+      7, 7, 7, 7, 8, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 10};
+  static const size_t positions[]={2, 2, 8, 2, 2, 2, 2, 2, 5, 0,
+      2, 4, 6, 9, 2, 4, 6, 9, 12, 2, 5, 7, 10, 2, 5, 7, 10, 13};
+  static ctrl_t *ctrl;
+  static graph_t *graph;
+  static idx_t xadj[65], adjncy[128], old_xadj[65], old_adjncy[128];
+  static real_t targets[]={0.5, 0.5, 0.5, 0.5};
+  idx_t options[METIS_NOPTIONS];
+  unsigned char *marker;
+  size_t baseline, test;
+  int i, kind, ncon, depth, saved_errno, status, result=0;
+  volatile int caught=0;
+#ifdef METIS_TEST_POSIX_QUERY
+  sigset_t before, after;
+
+  if (pthread_sigmask(SIG_SETMASK, NULL, &before) != 0)
+    return 1;
+#endif
+
+  AllowAllocations();
+  if (!gk_malloc_init())
+    return 2;
+  marker = (unsigned char *)gk_malloc(32, "prepared scratch marker");
+  if (marker == NULL || !gk_sigtrap())
+    return 3;
+  memset(marker, 0x5a, 32);
+  baseline = gk_GetCurMemoryUsed();
+  depth = gk_cur_jbufs;
+  for (i=0; i<64; i++) {
+    xadj[i] = 2*i;
+    adjncy[2*i] = (i+63)%64;
+    adjncy[2*i+1] = (i+1)%64;
+  }
+  xadj[64] = 128;
+  memcpy(old_xadj, xadj, sizeof(xadj));
+  memcpy(old_adjncy, adjncy, sizeof(adjncy));
+  gk_set_exit_on_error(0);
+  for (test=0; test<sizeof(kinds)/sizeof(kinds[0]); test++) {
+    kind = kinds[test];
+    ncon = kind == 1 || kind == 4 || kind >= 9 ? 2 : 1;
+    METIS_SetDefaultOptions(options);
+    options[METIS_OPTION_SEED] = 12345;
+    if (kind >= 7) {
+      options[METIS_OPTION_OBJTYPE] = kind == 8 || kind == 10 ?
+          METIS_OBJTYPE_VOL : METIS_OBJTYPE_CUT;
+      options[METIS_OPTION_CONTIG] = 1;
+    }
+    ctrl = NULL;
+    graph = NULL;
+    status = SetupCtrl(kind >= 7 ? METIS_OP_KMETIS :
+        kind == 5 || kind == 6 ? METIS_OP_OMETIS : METIS_OP_PMETIS,
+        options, ncon, kind == 5 || kind == 6 ? 3 : 2, NULL, NULL, &ctrl);
+    if (status != METIS_OK || SetupGraph(ctrl, 64, ncon, xadj, adjncy,
+          NULL, NULL, NULL, &graph) != METIS_OK)
+      return 4;
+    ctrl->mcore = gk_mcoreCreate(0);
+    if (ctrl->mcore == NULL || ctrl->mcore->coresize != 0)
+      return 5;
+    if (kind >= 7) {
+      SetupKWayBalMultipliers(ctrl, graph);
+      if (AllocateRefinementWorkSpace(ctrl, 128, 128) != METIS_OK ||
+          AllocateKWayPartitionMemory(ctrl, graph) != METIS_OK)
+        return 6;
+      for (i=0; i<64; i++)
+        graph->where[i] = i < 32 ? 0 : 1;
+      if (ComputeKWayPartitionParams(ctrl, graph) != METIS_OK)
+        return 7;
+      ComputeKWayBoundary(ctrl, graph, BNDTYPE_REFINE);
+    }
+    else {
+      Setup2WayBalMultipliers(ctrl, graph, targets);
+      if (kind <= 1 || kind == 6) {
+        if (Allocate2WayPartitionMemory(ctrl, graph) != METIS_OK)
+          return 8;
+        for (i=0; i<64; i++)
+          graph->where[i] = i < 32 ? 0 : 1;
+        Compute2WayPartitionParams(ctrl, graph);
+      }
+    }
+    if (ctrl->status != METIS_OK || ctrl->mcore->cmop != 0 ||
+        ctrl->mcore->cur_hallocs != 0)
+      return 9;
+    clobber_cleanup = 1;
+    cleanup_clobbers = allocations_after_failure = 0;
+    initialization_failed = 0;
+    caught = 0;
+    FailMcoreAllocation(positions[test] == 0 ? SIZE_MAX : positions[test]);
+    if (positions[test] == 0)
+      FailMessage("MinCover: flag");
+    errno = 0;
+    switch (gk_sigcatch()) {
+      case 0:
+        if (kind == 0)
+          FM_2WayCutRefine(ctrl, graph, targets, 1);
+        else if (kind == 1)
+          FM_Mc2WayCutRefine(ctrl, graph, targets, 1);
+        else if (kind == 2)
+          RandomBisection(ctrl, graph, targets, 1);
+        else if (kind == 3)
+          GrowBisection(ctrl, graph, targets, 1);
+        else if (kind == 4)
+          McRandomBisection(ctrl, graph, targets, 1);
+        else if (kind == 5)
+          GrowBisectionNode(ctrl, graph, targets, 1);
+        else if (kind == 6)
+          ConstructMinCoverSeparator(ctrl, graph);
+        else if (kind == 7)
+          Greedy_KWayCutOptimize(ctrl, graph, 1, 0.0, OMODE_REFINE);
+        else if (kind == 8)
+          Greedy_KWayVolOptimize(ctrl, graph, 1, 0.0, OMODE_REFINE);
+        else if (kind == 9)
+          Greedy_McKWayCutOptimize(ctrl, graph, 1, 0.0, OMODE_REFINE);
+        else
+          Greedy_McKWayVolOptimize(ctrl, graph, 1, 0.0, OMODE_REFINE);
+        break;
+      default:
+        caught = 1;
+        break;
+    }
+    saved_errno = errno;
+    AllowAllocations();
+    clobber_cleanup = initialization_failed = 0;
+    if (caught || saved_errno != ENOMEM || cleanup_clobbers == 0 ||
+        allocations_after_failure != 0 ||
+        mcore_count != (positions[test] == 0 ? 0 : positions[test]) ||
+        (positions[test] == 0 && message_hits != 1) ||
+        ctrl->status != METIS_ERROR_MEMORY || gk_cur_jbufs != depth ||
+        ctrl->mcore->cmop != 0 || ctrl->mcore->cur_hallocs != 0 ||
+        memcmp(xadj, old_xadj, sizeof(xadj)) != 0 ||
+        memcmp(adjncy, old_adjncy, sizeof(adjncy)) != 0)
+      result = 1;
+#ifdef METIS_TEST_POSIX_QUERY
+    if (pthread_sigmask(SIG_SETMASK, NULL, &after) != 0 ||
+        !SameQueryMask(&before, &after))
+      result = 1;
+#endif
+    fprintf(stderr, "prepared scratch %zu kind %d position %zu: errno %d, frees %zu, status %d, allocations %zu, after-failure %zu, message-hits %zu\n",
+        test, kind, positions[test], saved_errno, cleanup_clobbers,
+        ctrl->status, mcore_count, allocations_after_failure,
+        positions[test] == 0 ? message_hits : 0);
+    FreeGraph(&graph);
+    FreeCtrl(&ctrl);
+    if (gk_GetCurMemoryUsed() != baseline || marker[0] != 0x5a ||
+        marker[31] != 0x5a || RunQueryAPI(2, METIS_OBJTYPE_CUT, 0) != METIS_OK)
+      result = 1;
+  }
+  if (!gk_siguntrap() || gk_cur_jbufs != depth-1)
+    result = 1;
+  gk_free((void **)&marker, LTERM);
+  gk_malloc_cleanup(0);
+  gk_set_exit_on_error(1);
+  return result;
+}
+
+
+/*************************************************************************/
+/*! Checks frame failures across real CLI and library constructor boundaries. */
+/*************************************************************************/
+static int CheckCLIFrameFailures(void)
+{
+  const int errors[]={EIO, EINVAL, ENOMEM, EOVERFLOW};
+  const char *filenames[]={"metis-cli-linked.graph", "metis-cli-linked.mesh"};
+  const char *contents[]={"2 1\n2\n1\n", "1\n1 2\n"};
+  params_t params;
+  graph_t *graph;
+  mesh_t *mesh;
+  FILE *stream;
+  size_t error, baseline;
+  int mode, kind, position, status, saved_errno, expected;
+  int depth=gk_cur_jbufs, result=0;
+
+  for (kind=0; kind<2; kind++) {
+    stream = fopen(filenames[kind], "w");
+    if (stream == NULL)
+      return 1;
+    fputs(contents[kind], stream);
+    if (fclose(stream) != 0)
+      return 1;
+  }
+  AllowAllocations();
+  if (!gk_malloc_init())
+    return 2;
+  baseline = gk_GetCurMemoryUsed();
+  memset(&params, 0, sizeof(params));
+  for (mode=0; mode<=1; mode++) {
+    gk_set_exit_on_error(mode);
+    for (error=0; error<sizeof(errors)/sizeof(errors[0]); error++) {
+      expected = errors[error] == ENOMEM || errors[error] == EOVERFLOW ?
+          METIS_ERROR_MEMORY : METIS_ERROR;
+      for (kind=0; kind<2; kind++) {
+        params.filename = (char *)filenames[kind];
+        for (position=1; position<=2; position++) {
+          graph = NULL;
+          mesh = NULL;
+          trap_error = errors[error];
+          trap_hits = 0;
+          trap_count = 0;
+          trap_fail_at = position;
+          trap_armed = 1;
+          errno = 0;
+          if (kind == 0)
+            status = ReadGraph(&params, &graph);
+          else
+            status = ReadMesh(&params, &mesh);
+          saved_errno = errno;
+          trap_armed = 0;
+          initialization_failed = 0;
+          if (status != expected || saved_errno != errors[error] ||
+              trap_hits != 1 || trap_count != (size_t)position ||
+              graph != NULL || mesh != NULL || gk_cur_jbufs != depth ||
+              gk_GetCurMemoryUsed() != baseline) {
+            fprintf(stderr, "linked CLI mode %d kind %d frame %d: status %d errno %d hits %d\n",
+                mode, kind, position, status, saved_errno, trap_hits);
+            result = 3;
+          }
+        }
+      }
+    }
+  }
+  for (kind=0; kind<2; kind++) {
+    if (remove(filenames[kind]) != 0)
+      result = 4;
+  }
+  gk_malloc_cleanup(0);
+  gk_set_exit_on_error(1);
+  return result;
+}
+
+
+/*************************************************************************/
+/*! Makes termination callbacks distinguishable from a strict failure exit. */
+/*************************************************************************/
+static void ReleaseExitCallback(void)
+{
+  fputs("ATEXIT\n", stdout);
+}
+
+
+static void ReleaseAbortHandler(int signum)
+{
+  (void)signum;
+  _Exit(EXIT_SUCCESS);
+}
+
+
+static int CheckReleaseFailure(int mode)
+{
+  idx_t nvtxs=2, ncon=1, nparts=1, objval=-1;
+  idx_t xadj[3]={0, 1, 2}, adjncy[2]={1, 0}, part[2]={-1, -1};
+  idx_t options[METIS_NOPTIONS];
+
+  if (atexit(ReleaseExitCallback) != 0 ||
+      signal(SIGABRT, ReleaseAbortHandler) == SIG_ERR)
+    return EXIT_SUCCESS;
+  AllowAllocations();
+  gk_set_exit_on_error(mode);
+  METIS_SetDefaultOptions(options);
+  release_failure = 1;
+  METIS_PartGraphKway(&nvtxs, &ncon, xadj, adjncy, NULL, NULL, NULL,
+      &nparts, NULL, NULL, options, &objval, part);
+  fputs("AFTER\n", stdout);
+  return EXIT_FAILURE;
+}
+
+
+int main(int argc, char *argv[])
 {
   int status;
 
+  if (argc == 2 && strcmp(argv[1], "exit-status") == 0)
+    return EXIT_FAILURE;
+  if (argc == 2 && strcmp(argv[1], "cli-frame-failure") == 0)
+    return CheckCLIFrameFailures();
+  if (argc == 3 && strcmp(argv[1], "release-failure") == 0)
+    return CheckReleaseFailure(atoi(argv[2]));
+  if (argc == 2 && strcmp(argv[1], "workspace") == 0)
+    return CheckWorkspaceFailures();
+  if (argc == 2 && strcmp(argv[1], "prepared-scratch") == 0)
+    return CheckPreparedScratchFailures();
+  if (argc == 2 && strcmp(argv[1], "scratch-cleanup") == 0)
+    return CheckScratchCleanupFailures();
+  if (argc == 2 && strcmp(argv[1], "frame-cleanup") == 0) {
+    status = CheckFrameCleanupFailures();
+    return status == 0 ? CheckLargeFrameCleanupFailures() : status;
+  }
+#ifdef METIS_TEST_POSIX_QUERY
+  if (argc == 2 && strcmp(argv[1], "posix-query") == 0) {
+    status = CheckQueryFailures();
+    return status == 0 ? CheckQueryResizeFailures() : status;
+  }
+#endif
+  if (argc == 3)
+    return CheckKWayInitializationFailure(atoi(argv[1]), atoi(argv[2]),
+        METIS_OBJTYPE_CUT);
   gk_set_exit_on_error(1);
   AllowAllocations();
   status = CheckSetupCtrlFailures();
@@ -1436,6 +2761,12 @@ int main(void)
     status = CheckCoarsenFailure();
   if (status == 0)
     status = CheckCoarseGraphSizeFailures();
+  if (status == 0)
+    status = CheckKWayInitializationFailures();
+  if (status == 0)
+    status = CheckScratchCleanupFailures();
+  if (status == 0)
+    status = CheckPreparedScratchFailures();
   AllowAllocations();
   return status;
 }

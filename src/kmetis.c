@@ -22,9 +22,11 @@ int METIS_PartGraphKway(idx_t *nvtxs, idx_t *ncon, idx_t *xadj, idx_t *adjncy,
           idx_t *part)
 {
   volatile int rstatus=METIS_OK, sigrval=0, renumber=0;
+  int saved_errno;
   idx_t coarsen_floor, numflag, objtype;
   graph_t *graph;
   ctrl_t * volatile ctrl=NULL;
+  ctrl_t *cleanup_ctrl;
 
   /* validate all caller-owned dimensions before indexing their arrays */
   if (nvtxs == NULL || ncon == NULL || nparts == NULL ||
@@ -42,8 +44,11 @@ int METIS_PartGraphKway(idx_t *nvtxs, idx_t *ncon, idx_t *xadj, idx_t *adjncy,
     return METIS_ERROR_MEMORY;
 
   if (!gk_sigtrap()) {
+    int saved_errno=errno;
+    rstatus = metis_rcode(metis_sigtrap_error());
     gk_malloc_cleanup(0);
-    return METIS_ERROR_MEMORY;
+    errno = saved_errno;
+    return rstatus;
   }
 
   METIS_SIGCATCH(sigrval);
@@ -52,7 +57,8 @@ int METIS_PartGraphKway(idx_t *nvtxs, idx_t *ncon, idx_t *xadj, idx_t *adjncy,
 
   /* set up the run parameters */
   rstatus = SetupCtrl(METIS_OP_KMETIS, options, *ncon, *nparts, tpwgts,
-      ubvec, (ctrl_t **)&ctrl);
+      ubvec, &cleanup_ctrl);
+  ctrl = cleanup_ctrl;
   if (rstatus != METIS_OK)
     goto SIGTHROW;
 
@@ -82,7 +88,7 @@ int METIS_PartGraphKway(idx_t *nvtxs, idx_t *ncon, idx_t *xadj, idx_t *adjncy,
   if (ctrl->contig) {
     rstatus = IsConnected(graph, 0);
     if (rstatus < 0) {
-      rstatus = METIS_ERROR_MEMORY;
+      rstatus = metis_errno_error();
       goto SIGTHROW;
     }
     if (!rstatus)
@@ -113,9 +119,12 @@ int METIS_PartGraphKway(idx_t *nvtxs, idx_t *ncon, idx_t *xadj, idx_t *adjncy,
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, PrintTimers(ctrl));
 
   /* clean up */
-  FreeCtrl((ctrl_t **)&ctrl);
+  cleanup_ctrl = (ctrl_t *)ctrl;
+  FreeCtrl(&cleanup_ctrl);
+  ctrl = cleanup_ctrl;
 
 SIGTHROW:
+  saved_errno = errno;
   if (ctrl != NULL)
     graph_CleanupDiskFiles((ctrl_t *)ctrl);
 
@@ -127,9 +136,11 @@ SIGTHROW:
       Change2FNumbering2(*nvtxs, xadj, adjncy);
   }
 
-  gk_siguntrap();
+  metis_siguntrap();
   gk_malloc_cleanup(0);
 
+  if (rstatus != METIS_OK || sigrval != 0)
+    errno = saved_errno;
   return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }
 
@@ -167,6 +178,8 @@ idx_t MlevelKWayPartitioning(ctrl_t *ctrl, graph_t *graph, idx_t *part)
 
     /* Compute the initial partitioning */
     InitKWayPartitioning(ctrl, cgraph);
+    if (ctrl->status != METIS_OK)
+      return 0;
 
     /* Re-allocate the work space */
     if (AllocateWorkSpace(ctrl, graph) != METIS_OK)
@@ -230,7 +243,10 @@ void InitKWayPartitioning(ctrl_t *ctrl, graph_t *graph)
   idx_t i, ntrials, options[METIS_NOPTIONS], curobj=0, bestobj=0;
   idx_t *bestwhere=NULL;
   real_t *ubvec=NULL;
-  int status;
+  int status, saved_errno;
+
+  if (ctrl->status != METIS_OK)
+    return;
 
   METIS_SetDefaultOptions(options);
   //options[METIS_OPTION_NITER]     = 10;
@@ -242,6 +258,10 @@ void InitKWayPartitioning(ctrl_t *ctrl, graph_t *graph)
   //options[METIS_OPTION_DBGLVL]    = ctrl->dbglvl;
 
   ubvec = rmalloc(graph->ncon, "InitKWayPartitioning: ubvec");
+  if (ubvec == NULL) {
+    status = METIS_ERROR_MEMORY;
+    goto ERROR;
+  }
   for (i=0; i<graph->ncon; i++) 
     ubvec[i] = (real_t)pow(ctrl->ubfactors[i], 1.0/log(ctrl->nparts));
 
@@ -256,13 +276,17 @@ void InitKWayPartitioning(ctrl_t *ctrl, graph_t *graph)
                    options, &curobj, graph->where);
 
       if (status != METIS_OK)
-        gk_errexit(SIGERR, "Failed during initial partitioning\n");
+        goto ERROR;
 
       break;
 
 #ifdef XXX /* This does not seem to help */
     case METIS_OBJTYPE_VOL:
       bestwhere = imalloc(graph->nvtxs, "InitKWayPartitioning: bestwhere");
+      if (bestwhere == NULL) {
+        status = METIS_ERROR_MEMORY;
+        goto ERROR;
+      }
       options[METIS_OPTION_NCUTS] = 2;
 
       ntrials = (ctrl->nIparts+1)/2;
@@ -272,9 +296,13 @@ void InitKWayPartitioning(ctrl_t *ctrl, graph_t *graph)
                      graph->adjwgt, &ctrl->nparts, ctrl->tpwgts, ubvec, 
                      options, &curobj, graph->where);
         if (status != METIS_OK)
-          gk_errexit(SIGERR, "Failed during initial partitioning\n");
+          goto ERROR;
 
         curobj = ComputeVolume(graph, graph->where);
+        if (curobj < 0) {
+          status = metis_errno_error();
+          goto ERROR;
+        }
 
         if (i == 0 || bestobj > curobj) {
           bestobj = curobj;
@@ -293,8 +321,23 @@ void InitKWayPartitioning(ctrl_t *ctrl, graph_t *graph)
 
     default:
       gk_errexit(SIGERR, "Unknown objtype: %d\n", ctrl->objtype);
+      status = METIS_ERROR_INPUT;
+      goto ERROR;
   }
 
+  goto CLEANUP;
+
+ERROR:
+  /* The recursive API has already recovered its own frame. Publish its first
+     error without raising a different signal or continuing refinement. */
+  saved_errno = errno;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = status;
+  gk_free((void **)&ubvec, &bestwhere, LTERM);
+  errno = saved_errno;
+  return;
+
+CLEANUP:
   gk_free((void **)&ubvec, &bestwhere, LTERM);
 
 }
@@ -356,10 +399,11 @@ idx_t BlockKWayPartitioning(ctrl_t *ctrl, graph_t *graph, idx_t *part)
   cpwgts = iwspacemalloc(ctrl, nparts);
   fpart  = iwspacemalloc(ctrl, mynparts);
   perm   = iwspacemalloc(ctrl, mynparts);
-  queue  = ipqCreate(nparts);
+  queue  = ctrl->status == METIS_OK ? ipqCreate(nparts) : NULL;
   if (fpwgts == NULL || cpwgts == NULL || fpart == NULL || perm == NULL ||
       queue == NULL) {
-    ctrl->status = METIS_ERROR_MEMORY;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
     if (queue != NULL)
       ipqDestroy(queue);
     WCOREPOP;

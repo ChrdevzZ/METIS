@@ -21,6 +21,10 @@ include("${MODULE_FILE}")
 # identification, whose bootstrap project may not know a user configuration.
 if(DEFINED PROBE_ACTIVE_CONFIG)
   set(CMAKE_TRY_COMPILE_CONFIGURATION "${PROBE_ACTIVE_CONFIG}")
+  if(CMAKE_CONFIGURATION_TYPES)
+    list(APPEND CMAKE_CONFIGURATION_TYPES "${PROBE_ACTIVE_CONFIG}")
+    list(REMOVE_DUPLICATES CMAKE_CONFIGURATION_TYPES)
+  endif()
 endif()
 
 # Seed every check-state variable with a value that the fixture can compare.

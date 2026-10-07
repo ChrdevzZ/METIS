@@ -30,11 +30,14 @@ graph_t *CompressGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
   idx_t *cxadj, *cadjncy, *cvwgt, *mark=NULL, *map=NULL;
   ikv_t *keys=NULL;
   graph_t *graph=NULL;
+  int saved_errno;
 
   if (nvtxs < 0 ||
       (uintmax_t)nvtxs > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
-      (uintmax_t)nvtxs > (uintmax_t)SIZE_MAX/sizeof(ikv_t))
+      (uintmax_t)nvtxs > (uintmax_t)SIZE_MAX/sizeof(ikv_t)) {
+    errno = EOVERFLOW;
     goto MEMORY_ERROR;
+  }
   mark = ismalloc(nvtxs, -1, "CompressGraph: mark");
   map  = ismalloc(nvtxs, -1, "CompressGraph: map");
   keys = ikvmalloc(nvtxs, "CompressGraph: keys");
@@ -120,14 +123,18 @@ graph_t *CompressGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
     cnedges = 0;
     for (i=0; i<cnvtxs; i++) {
       ii = cind[cptr[i]];
-      if (xadj[ii+1]-xadj[ii] > IDX_MAX-cnedges)
+      if (xadj[ii+1]-xadj[ii] > IDX_MAX-cnedges) {
+        errno = EOVERFLOW;
         goto MEMORY_ERROR;
+      }
       cnedges += xadj[ii+1]-xadj[ii];
     }
     if ((uintmax_t)(cnvtxs+1) > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
         (uintmax_t)(cnedges > 0 ? cnedges : 1) >
-            (uintmax_t)SIZE_MAX/sizeof(idx_t))
+            (uintmax_t)SIZE_MAX/sizeof(idx_t)) {
+      errno = EOVERFLOW;
       goto MEMORY_ERROR;
+    }
 
     /* Allocate memory for the compressed graph */
     cxadj   = graph->xadj   = imalloc(cnvtxs+1, "CompressGraph: xadj");
@@ -167,9 +174,16 @@ graph_t *CompressGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
     graph->nedges = l;
     graph->ncon   = 1;
 
-    if (SetupGraph_tvwgt(graph) != METIS_OK ||
-        SetupGraph_label(graph) != METIS_OK)
-      goto MEMORY_ERROR;
+    {
+      int status = SetupGraph_tvwgt(graph);
+      if (status == METIS_OK)
+        status = SetupGraph_label(graph);
+      if (status != METIS_OK) {
+        if (ctrl->status == METIS_OK)
+          ctrl->status = status;
+        goto MEMORY_ERROR;
+      }
+    }
   }
 
   gk_free((void **)&keys, &map, &mark, LTERM);
@@ -177,9 +191,12 @@ graph_t *CompressGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
   return graph;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  saved_errno = errno != 0 ? errno : ENOMEM;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = metis_errno_error();
   FreeGraph(&graph);
   gk_free((void **)&keys, &map, &mark, LTERM);
+  errno = saved_errno;
   return NULL;
 }
 
@@ -199,10 +216,13 @@ graph_t *PruneGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
   idx_t *pxadj, *padjncy, *pvwgt;
   idx_t *perm=NULL;
   graph_t *graph=NULL;
+  int saved_errno;
 
   if (nvtxs <= 0 || (uintmax_t)nvtxs >
-      (uintmax_t)SIZE_MAX/sizeof(idx_t))
+      (uintmax_t)SIZE_MAX/sizeof(idx_t)) {
+    errno = EOVERFLOW;
     goto MEMORY_ERROR;
+  }
   perm = imalloc(nvtxs, "PruneGraph: perm");
   if (perm == NULL)
     goto MEMORY_ERROR;
@@ -214,8 +234,10 @@ graph_t *PruneGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
     if (xadj[i+1]-xadj[i] < factor) {
       perm[i] = pnvtxs;
       iperm[pnvtxs++] = i;
-      if (xadj[i+1]-xadj[i] > IDX_MAX-pnedges)
+      if (xadj[i+1]-xadj[i] > IDX_MAX-pnedges) {
+        errno = EOVERFLOW;
         goto MEMORY_ERROR;
+      }
       pnedges += xadj[i+1]-xadj[i];
     }
     else {
@@ -236,8 +258,10 @@ graph_t *PruneGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
 
     if ((uintmax_t)(pnvtxs+1) > (uintmax_t)SIZE_MAX/sizeof(idx_t) ||
         (uintmax_t)(pnedges > 0 ? pnedges : 1) >
-            (uintmax_t)SIZE_MAX/sizeof(idx_t))
+            (uintmax_t)SIZE_MAX/sizeof(idx_t)) {
+      errno = EOVERFLOW;
       goto MEMORY_ERROR;
+    }
 
     /* Allocate memory for the prunned graph*/
     pxadj   = graph->xadj   = imalloc(pnvtxs+1, "PruneGraph: xadj");
@@ -268,9 +292,16 @@ graph_t *PruneGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
     graph->nedges = pnedges;
     graph->ncon   = 1;
 
-    if (SetupGraph_tvwgt(graph) != METIS_OK ||
-        SetupGraph_label(graph) != METIS_OK)
-      goto MEMORY_ERROR;
+    {
+      int status = SetupGraph_tvwgt(graph);
+      if (status == METIS_OK)
+        status = SetupGraph_label(graph);
+      if (status != METIS_OK) {
+        if (ctrl->status == METIS_OK)
+          ctrl->status = status;
+        goto MEMORY_ERROR;
+      }
+    }
   }
   else if (nlarge > 0 && nlarge == nvtxs) {  
     IFSET(ctrl->dbglvl, METIS_DBG_INFO, 
@@ -284,9 +315,12 @@ graph_t *PruneGraph(ctrl_t *ctrl, idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
   return graph;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  saved_errno = errno != 0 ? errno : ENOMEM;
+  if (ctrl->status == METIS_OK)
+    ctrl->status = metis_errno_error();
   FreeGraph(&graph);
   gk_free((void **)&perm, LTERM);
+  errno = saved_errno;
   return NULL;
 }
 

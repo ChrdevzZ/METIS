@@ -4,6 +4,9 @@
 #include <metis.h>
 #include <GKlib.h>
 
+#define METIS_CONSUMER_NO_MAIN
+#include "main.c"
+
 #ifdef METIS_TEST_LIBCXX
 #ifndef _LIBCPP_VERSION
 #error "The CLANG64 consumer must use libc++"
@@ -20,5 +23,6 @@ int main()
   gk_isorti(2, values);
   const bool sorted = values[0] == 1 && values[1] == 2;
   gk_free((void **)&values, LTERM);
-  return !sorted || name.empty() || METIS_SetDefaultOptions(options.data()) != METIS_OK;
+  return !sorted || name.empty() || METIS_SetDefaultOptions(options.data()) != METIS_OK ||
+      metis_consumer_run() != 0;
 }

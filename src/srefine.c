@@ -22,6 +22,7 @@
 /*************************************************************************/
 void Refine2WayNode(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph)
 {
+  int saved_errno;
 
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->UncoarsenTmr));
 
@@ -36,12 +37,17 @@ void Refine2WayNode(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph)
 
       IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->ProjectTmr));
       Project2WayNodePartition(ctrl, graph);
+      saved_errno = errno;
       IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->ProjectTmr));
-      if (ctrl->status != METIS_OK)
+      if (ctrl->status != METIS_OK) {
+        errno = saved_errno;
         break;
+      }
 
       IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_startcputimer(ctrl->RefTmr));
       FM_2WayNodeBalance(ctrl, graph); 
+      if (ctrl->status != METIS_OK)
+        goto REFINEMENT_ERROR;
 
       ASSERT(CheckNodePartitionParams(graph));
 
@@ -55,12 +61,24 @@ void Refine2WayNode(ctrl_t *ctrl, graph_t *orggraph, graph_t *graph)
         default:
           gk_errexit(SIGERR, "Unknown rtype of %d\n", ctrl->rtype);
       }
+      if (ctrl->status != METIS_OK)
+        goto REFINEMENT_ERROR;
       IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->RefTmr));
 
     } while (graph != orggraph);
   }
 
+  saved_errno = errno;
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->UncoarsenTmr));
+  if (ctrl->status != METIS_OK)
+    errno = saved_errno;
+  return;
+
+REFINEMENT_ERROR:
+  saved_errno = errno;
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->RefTmr));
+  IFSET(ctrl->dbglvl, METIS_DBG_TIME, gk_stopcputimer(ctrl->UncoarsenTmr));
+  errno = saved_errno;
 }
 
 
@@ -76,6 +94,7 @@ int Allocate2WayNodePartitionMemory(ctrl_t *ctrl, graph_t *graph)
   nrinfo_t *cleanup_nrinfo;
   nrinfo_t * volatile nrinfo=NULL;
   idx_t nvtxs;
+  int saved_errno;
 
   if (ctrl == NULL || graph == NULL) {
     errno = EINVAL;
@@ -98,8 +117,9 @@ int Allocate2WayNodePartitionMemory(ctrl_t *ctrl, graph_t *graph)
   }
 
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
-    goto MEMORY_ERROR;
+    if (ctrl->status >= 0)
+      ctrl->status = metis_rcode(metis_sigtrap_error());
+    return ctrl->status;
   }
   METIS_SIGCATCH(sigrval);
   if (sigrval != 0)
@@ -115,7 +135,7 @@ int Allocate2WayNodePartitionMemory(ctrl_t *ctrl, graph_t *graph)
       nrinfo == NULL)
     goto ALLOCATION_ERROR;
 
-  gk_siguntrap();
+  metis_siguntrap();
   gk_free((void **)&graph->pwgts, &graph->where, &graph->bndptr,
       &graph->bndind, &graph->nrinfo, LTERM);
   graph->pwgts  = (idx_t *)pwgts;
@@ -126,6 +146,7 @@ int Allocate2WayNodePartitionMemory(ctrl_t *ctrl, graph_t *graph)
   return METIS_OK;
 
 ALLOCATION_ERROR:
+  saved_errno = errno;
   cleanup_pwgts = (idx_t *)pwgts;
   cleanup_where = (idx_t *)where;
   cleanup_bndptr = (idx_t *)bndptr;
@@ -133,13 +154,15 @@ ALLOCATION_ERROR:
   cleanup_nrinfo = (nrinfo_t *)nrinfo;
   gk_free((void **)&cleanup_pwgts, &cleanup_where, &cleanup_bndptr,
       &cleanup_bndind, &cleanup_nrinfo, LTERM);
-  gk_siguntrap();
+  metis_siguntrap();
+  errno = saved_errno;
 
 MEMORY_ERROR:
-  ctrl->status = METIS_ERROR_MEMORY;
+  if (ctrl->status >= 0)
+    ctrl->status = sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
   if (errno == 0)
-    errno = ENOMEM;
-  return METIS_ERROR_MEMORY;
+    errno = sigrval == SIGERR ? EINVAL : ENOMEM;
+  return ctrl->status;
 }
 
 

@@ -191,7 +191,7 @@
       "id": "metis-libmetis-balance-c",
       "kind": "modified",
       "local_path": "src/balance.c",
-      "notes": "Relocated from libmetis/ to src/; exits when a workspace frame cannot be established and compares the three-times-average balance tolerance without overflowing.",
+      "notes": "Relocated from libmetis/ to src/; exits when a workspace frame cannot be established and compares the three-times-average balance tolerance without overflowing. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Returning boundary/general balance scratch failures stop later allocations and preserve the first errno through workspace cleanup.",
       "upstream_path": "libmetis/balance.c"
     },
     {
@@ -223,7 +223,7 @@
       "id": "metis-libmetis-coarsen-c",
       "kind": "modified",
       "local_path": "src/coarsen.c",
-      "notes": "Relocated from libmetis/ to src/; validates coarse-graph counts and allocation arithmetic before construction, propagates matching-sort workspace failure, and avoids overflowing matching and drop-edge comparisons.",
+      "notes": "Relocated from libmetis/ to src/; validates coarse-graph counts and allocation arithmetic before construction, propagates matching-sort workspace failure, and avoids overflowing matching and drop-edge comparisons. Preserve failed frame-setup categories and first errno through real consumers and cleanup.",
       "upstream_path": "libmetis/coarsen.c"
     },
     {
@@ -231,7 +231,7 @@
       "id": "metis-libmetis-compress-c",
       "kind": "modified",
       "local_path": "src/compress.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/. Preserve failed frame-setup categories and first errno through real consumers and cleanup.",
       "upstream_path": "libmetis/compress.c"
     },
     {
@@ -239,7 +239,7 @@
       "id": "metis-libmetis-contig-c",
       "kind": "modified",
       "local_path": "src/contig.c",
-      "notes": "Relocated from libmetis/ to src/; propagates connectivity allocation failures and handles empty induced vertex sets.",
+      "notes": "Relocated from libmetis/ to src/; propagates connectivity allocation failures and handles empty induced vertex sets. Preserve failed frame-setup categories and first errno through real consumers and cleanup.",
       "upstream_path": "libmetis/contig.c"
     },
     {
@@ -263,7 +263,7 @@
       "id": "metis-libmetis-fm-c",
       "kind": "modified",
       "local_path": "src/fm.c",
-      "notes": "Relocated from libmetis/ to src/; checks workspace setup before two-way refinement and preserves average-weight and balance decisions at the index limit.",
+      "notes": "Relocated from libmetis/ to src/; checks workspace setup before two-way refinement and preserves average-weight and balance decisions at the index limit. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Short-circuit failed scratch allocation groups and preserve the first errno across their workspace cleanup.",
       "upstream_path": "libmetis/fm.c"
     },
     {
@@ -311,7 +311,7 @@
       "id": "metis-libmetis-graph-c",
       "kind": "modified",
       "local_path": "src/graph.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/. Preserve failed frame-setup categories and first errno through real consumers and cleanup.",
       "upstream_path": "libmetis/graph.c"
     },
     {
@@ -319,7 +319,7 @@
       "id": "metis-libmetis-initpart-c",
       "kind": "modified",
       "local_path": "src/initpart.c",
-      "notes": "Relocated from libmetis/ to src/; checks workspace setup before initial partition trials and commits initial node-bisection state only after complete allocation.",
+      "notes": "Relocated from libmetis/ to src/; checks workspace setup before initial partition trials and commits initial node-bisection state only after complete allocation. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Stop later bisection trials and refinement after the first helper failure. Short-circuit failed scratch allocation groups and preserve the first errno across their workspace cleanup.",
       "upstream_path": "libmetis/initpart.c"
     },
     {
@@ -327,7 +327,7 @@
       "id": "metis-libmetis-kmetis-c",
       "kind": "modified",
       "local_path": "src/kmetis.c",
-      "notes": "Relocated from libmetis/ to src/; distinguishes connectivity allocation failure from disconnected input and keeps the experimental single-constraint block path defined for low-degree graphs.",
+      "notes": "Relocated from libmetis/ to src/; distinguishes connectivity allocation failure from disconnected input and keeps the experimental single-constraint block path defined for low-degree graphs. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Use ordinary output/cleanup pointers to preserve volatile recovery ownership.",
       "upstream_path": "libmetis/kmetis.c"
     },
     {
@@ -335,7 +335,7 @@
       "id": "metis-libmetis-kwayfm-c",
       "kind": "modified",
       "local_path": "src/kwayfm.c",
-      "notes": "Relocated from libmetis/ to src/; grows subdomain adjacency transactionally and evaluates weak connections without signed overflow.",
+      "notes": "Relocated from libmetis/ to src/; grows subdomain adjacency transactionally and evaluates weak connections without signed overflow. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Short-circuit failed scratch allocation groups and preserve the first errno across their workspace cleanup.",
       "upstream_path": "libmetis/kwayfm.c"
     },
     {
@@ -343,7 +343,7 @@
       "id": "metis-libmetis-kwayrefine-c",
       "kind": "modified",
       "local_path": "src/kwayrefine.c",
-      "notes": "Relocated from libmetis/ to src/; K-way cut/volume refinement state allocates transactionally with input, overflow, and nested-signal failure status.",
+      "notes": "Relocated from libmetis/ to src/; K-way cut/volume refinement state allocates transactionally with input, overflow, and nested-signal failure status. Preserve failed frame-setup categories and first errno through real consumers and cleanup.",
       "upstream_path": "libmetis/kwayrefine.c"
     },
     {
@@ -367,7 +367,7 @@
       "id": "metis-libmetis-mesh-c",
       "kind": "modified",
       "local_path": "src/mesh.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/. Preserve failed frame-setup categories and first errno through real consumers and cleanup.",
       "upstream_path": "libmetis/mesh.c"
     },
     {
@@ -375,7 +375,7 @@
       "id": "metis-libmetis-meshpart-c",
       "kind": "modified",
       "local_path": "src/meshpart.c",
-      "notes": "Relocated from libmetis/ to src/; checks post-partition allocations and commits caller partition arrays and objective only after both sides succeed.",
+      "notes": "Relocated from libmetis/ to src/; checks post-partition allocations and commits caller partition arrays and objective only after both sides succeed. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Use ordinary conversion output pointers before assigning volatile recovery owners.",
       "upstream_path": "libmetis/meshpart.c"
     },
     {
@@ -383,7 +383,7 @@
       "id": "metis-libmetis-metislib-h",
       "kind": "modified",
       "local_path": "src/metislib.h",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Internal owners check recovery-frame release before leaving their activation.",
       "upstream_path": "libmetis/metislib.h"
     },
     {
@@ -391,7 +391,7 @@
       "id": "metis-libmetis-minconn-c",
       "kind": "modified",
       "local_path": "src/minconn.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/. Preserve failed frame-setup categories and first errno through real consumers and cleanup.",
       "upstream_path": "libmetis/minconn.c"
     },
     {
@@ -399,7 +399,7 @@
       "id": "metis-libmetis-mincover-c",
       "kind": "modified",
       "local_path": "src/mincover.c",
-      "notes": "Relocated from libmetis/ to src/; allocates minimum-cover work arrays transactionally and reports failure.",
+      "notes": "Relocated from libmetis/ to src/; allocates minimum-cover work arrays transactionally and reports failure. Preserve failed frame-setup categories and first errno through real consumers and cleanup.",
       "upstream_path": "libmetis/mincover.c"
     },
     {
@@ -415,7 +415,7 @@
       "id": "metis-libmetis-ometis-c",
       "kind": "modified",
       "local_path": "src/ometis.c",
-      "notes": "Relocated from libmetis/ to src/; rejects unrepresentable minimum-degree workspace before changing private graph numbering.",
+      "notes": "Relocated from libmetis/ to src/; rejects unrepresentable minimum-degree workspace before changing private graph numbering. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Use ordinary output/cleanup pointers to preserve volatile recovery ownership. Returning minimum-degree scratch failures stop later allocations and preserve the first errno through restored numbering and workspace cleanup.",
       "upstream_path": "libmetis/ometis.c"
     },
     {
@@ -423,7 +423,7 @@
       "id": "metis-libmetis-options-c",
       "kind": "modified",
       "local_path": "src/options.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/. Preserve failed frame-setup categories and first errno through real consumers and cleanup.",
       "upstream_path": "libmetis/options.c"
     },
     {
@@ -431,7 +431,7 @@
       "id": "metis-libmetis-parmetis-c",
       "kind": "modified",
       "local_path": "src/parmetis.c",
-      "notes": "Relocated from libmetis/ to src/; MOVEINFO diagnostics avoid a missing opposite candidate and preserve the selected gain before queue updates. Node-refinement balance differences use width-matched iabs instead of narrowing through C int.",
+      "notes": "Relocated from libmetis/ to src/; MOVEINFO diagnostics avoid a missing opposite candidate and preserve the selected gain before queue updates. Node-refinement balance differences use width-matched iabs instead of narrowing through C int. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Use ordinary output/cleanup pointers to preserve volatile recovery ownership. Returning one-sided and two-sided retained refinement scratch failures stop later allocations and preserve the first errno through queue and workspace cleanup.",
       "upstream_path": "libmetis/parmetis.c"
     },
     {
@@ -439,7 +439,7 @@
       "id": "metis-libmetis-pmetis-c",
       "kind": "modified",
       "local_path": "src/pmetis.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Use ordinary output/cleanup pointers to preserve volatile recovery ownership.",
       "upstream_path": "libmetis/pmetis.c"
     },
     {
@@ -455,7 +455,7 @@
       "id": "metis-libmetis-refine-c",
       "kind": "modified",
       "local_path": "src/refine.c",
-      "notes": "Relocated from libmetis/ to src/; allocates two-way edge-refinement state transactionally and propagates construction failures.",
+      "notes": "Relocated from libmetis/ to src/; allocates two-way edge-refinement state transactionally and propagates construction failures. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Stop subsequent balancing and refinement after the first helper failure.",
       "upstream_path": "libmetis/refine.c"
     },
     {
@@ -471,7 +471,7 @@
       "id": "metis-libmetis-separator-c",
       "kind": "modified",
       "local_path": "src/separator.c",
-      "notes": "Relocated from libmetis/ to src/; checks workspace and minimum-cover setup before changing the separator.",
+      "notes": "Relocated from libmetis/ to src/; checks workspace and minimum-cover setup before changing the separator. Stop subsequent separator refinement after a failed helper. Short-circuit failed scratch allocation groups and preserve the first errno across their workspace cleanup.",
       "upstream_path": "libmetis/separator.c"
     },
     {
@@ -479,7 +479,7 @@
       "id": "metis-libmetis-sfm-c",
       "kind": "modified",
       "local_path": "src/sfm.c",
-      "notes": "Relocated from libmetis/ to src/; MOVEINFO diagnostics avoid a missing opposite candidate and preserve the selected gain before queue updates. Balance thresholds, capped boundary heuristics, paired one-sided iterations, and nonnegative real-to-index conversions remain defined at the index limit.",
+      "notes": "Relocated from libmetis/ to src/; MOVEINFO diagnostics avoid a missing opposite candidate and preserve the selected gain before queue updates. Balance thresholds, capped boundary heuristics, paired one-sided iterations, and nonnegative real-to-index conversions remain defined at the index limit. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Returning node refinement and balance scratch failures stop later allocations and preserve the first errno through queue and workspace cleanup.",
       "upstream_path": "libmetis/sfm.c"
     },
     {
@@ -487,15 +487,15 @@
       "id": "metis-libmetis-srefine-c",
       "kind": "modified",
       "local_path": "src/srefine.c",
-      "notes": "Relocated from libmetis/ to src/; allocates two-way node-refinement state transactionally and propagates construction failures.",
+      "notes": "Relocated from libmetis/ to src/; allocates two-way node-refinement state transactionally and propagates construction failures. Preserve failed frame-setup categories and first errno through real consumers and cleanup. Stop subsequent node balancing and refinement after the first helper failure.",
       "upstream_path": "libmetis/srefine.c"
     },
     {
       "baseline_blob": "6860094317cfa807fb126cf3ed9c6dfe6a8e10ea",
       "id": "metis-libmetis-stat-c",
-      "kind": "direct",
+      "kind": "modified",
       "local_path": "src/stat.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/. Stop bipartite reporting after a failed volume calculation before constructing temporary weights or printing statistics.",
       "upstream_path": "libmetis/stat.c"
     },
     {
@@ -535,7 +535,7 @@
       "id": "metis-libmetis-wspace-c",
       "kind": "modified",
       "local_path": "src/wspace.c",
-      "notes": "Relocated from libmetis/ to src/.",
+      "notes": "Relocated from libmetis/ to src/. Preserve failed frame-setup categories and first errno through real consumers and cleanup.",
       "upstream_path": "libmetis/wspace.c"
     },
     {
@@ -612,6 +612,14 @@
     },
     {
       "baseline_blob": null,
+      "id": "metis-local-tests-cli-frame-failure-c",
+      "kind": "local",
+      "local_path": "tests/cli_frame_failure.c",
+      "notes": "Parameterized source-inclusion checks for CLI frame establishment, first errno, status and ownership. Extend ordering-vector checks through both real recovery policies, both allocation positions and controlled cleanup errno changes.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
       "id": "metis-local-tests-coarsen-numeric-c",
       "kind": "local",
       "local_path": "tests/coarsen_numeric.c",
@@ -623,7 +631,7 @@
       "id": "metis-local-tests-constructor-failure-c",
       "kind": "local",
       "local_path": "tests/constructor_failure.c",
-      "notes": "Local deterministic failure fixture for control, graph, workspace, two-way and K-way refinement, initial node-bisection, minimum-cover, matching-sort, minimum-degree ordering and coarse-graph size boundaries, graph-conversion construction, and atomic mesh-partition outputs.",
+      "notes": "Local deterministic failure fixture for control, graph, workspace, two-way and K-way refinement, initial node-bisection, minimum-cover, matching-sort, minimum-degree ordering and coarse-graph size boundaries, graph-conversion construction, and atomic mesh-partition outputs. Local linked failure fixture for constructors and ten API entry points; bounded real malloc/calloc injection across installed IPO mcore creation, live outer recovery state, numbering/ownership, and selected heap-scratch first-errno cleanup.",
       "upstream_path": null
     },
     {
@@ -903,7 +911,7 @@
       "id": "metis-programs-cmpfillin-c",
       "kind": "modified",
       "local_path": "apps/cmpfillin.c",
-      "notes": "Relocated from programs/ to apps/; propagates read and symbolic-factor status and retains 64-bit fill statistics on 32-bit hosts.",
+      "notes": "Relocated from programs/ to apps/; propagates read and symbolic-factor status and retains 64-bit fill statistics on 32-bit hosts. Frame establishment preserves the first errno and resource/general status. Stop after the first ordering-vector allocation failure and retain its errno through partial-result cleanup.",
       "upstream_path": "programs/cmpfillin.c"
     },
     {
@@ -935,7 +943,7 @@
       "id": "metis-programs-io-c",
       "kind": "modified",
       "local_path": "apps/io.c",
-      "notes": "Relocated from programs/ to apps/; sizes output names from their inputs and validates full-width target-weight ranges and values without accepting trailing input.",
+      "notes": "Relocated from programs/ to apps/; sizes output names from their inputs and validates full-width target-weight ranges and values without accepting trailing input. Frame establishment preserves the first errno and resource/general status.",
       "upstream_path": "programs/io.c"
     },
     {
@@ -983,7 +991,7 @@
       "id": "metis-programs-smbfactor-c",
       "kind": "modified",
       "local_path": "apps/smbfactor.c",
-      "notes": "Relocated from programs/ to apps/; validates CSR and permutation arrays, checks symbolic-factor sizes, operation-count accumulation and subscript growth before arithmetic, retains 64-bit fill statistics on 32-bit hosts, and preserves one-based indexing without forming pointers before their arrays.",
+      "notes": "Relocated from programs/ to apps/; validates CSR and permutation arrays, checks symbolic-factor sizes, operation-count accumulation and subscript growth before arithmetic, retains 64-bit fill statistics on 32-bit hosts, and preserves one-based indexing without forming pointers before their arrays. Frame establishment preserves the first errno and resource/general status.",
       "upstream_path": "programs/smbfactor.c"
     },
     {

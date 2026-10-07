@@ -30,11 +30,13 @@ int METIS_NodeNDP(idx_t nvtxs, idx_t *xadj, idx_t *adjncy, idx_t *vwgt,
            idx_t npes, idx_t *options, idx_t *perm, idx_t *iperm, idx_t *sizes) 
 {
   volatile int rstatus=METIS_OK, sigrval=0;
+  int saved_errno;
   idx_t i, ii, j, l;
   volatile idx_t nnvtxs=0;
   idx_t numflag, objtype;
   graph_t *graph;
   ctrl_t * volatile ctrl=NULL;
+  ctrl_t *cleanup_ctrl;
   idx_t *cptr, *cind;
 
   numflag = GETOPTION(options, METIS_OPTION_NUMBERING, 0);
@@ -57,8 +59,11 @@ int METIS_NodeNDP(idx_t nvtxs, idx_t *xadj, idx_t *adjncy, idx_t *vwgt,
     return METIS_ERROR_MEMORY;
 
   if (!gk_sigtrap()) {
+    int saved_errno=errno;
+    rstatus = metis_rcode(metis_sigtrap_error());
     gk_malloc_cleanup(0);
-    return METIS_ERROR_MEMORY;
+    errno = saved_errno;
+    return rstatus;
   }
 
   METIS_SIGCATCH(sigrval);
@@ -66,7 +71,8 @@ int METIS_NodeNDP(idx_t nvtxs, idx_t *xadj, idx_t *adjncy, idx_t *vwgt,
     goto SIGTHROW;
 
   rstatus = SetupCtrl(METIS_OP_OMETIS, options, 1, 3, NULL, NULL,
-      (ctrl_t **)&ctrl);
+      &cleanup_ctrl);
+  ctrl = cleanup_ctrl;
   if (rstatus != METIS_OK)
     goto SIGTHROW;
 
@@ -144,15 +150,20 @@ int METIS_NodeNDP(idx_t nvtxs, idx_t *xadj, idx_t *adjncy, idx_t *vwgt,
   IFSET(ctrl->dbglvl, METIS_DBG_TIME, PrintTimers(ctrl));
 
   /* clean up */
-  FreeCtrl((ctrl_t **)&ctrl);
+  cleanup_ctrl = (ctrl_t *)ctrl;
+  FreeCtrl(&cleanup_ctrl);
+  ctrl = cleanup_ctrl;
 
 SIGTHROW:
+  saved_errno = errno;
   if (ctrl != NULL)
     graph_CleanupDiskFiles((ctrl_t *)ctrl);
 
-  gk_siguntrap();
+  metis_siguntrap();
   gk_malloc_cleanup(0);
 
+  if (rstatus != METIS_OK || sigrval != 0)
+    errno = saved_errno;
   return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }
 
@@ -177,7 +188,9 @@ void MlevelNestedDissectionP(ctrl_t *ctrl, graph_t *graph, idx_t *order,
 
   MlevelNodeBisectionMultiple(ctrl, graph);
   if (ctrl->status != METIS_OK) {
+    int saved_errno = errno;
     FreeGraph(&graph);
+    errno = saved_errno;
     return;
   }
 
@@ -200,9 +213,11 @@ void MlevelNestedDissectionP(ctrl_t *ctrl, graph_t *graph, idx_t *order,
 
   SplitGraphOrder(ctrl, graph, &lgraph, &rgraph);
   if (ctrl->status != METIS_OK) {
+    int saved_errno = errno;
     FreeGraph(&graph);
     FreeGraph(&lgraph);
     FreeGraph(&rgraph);
+    errno = saved_errno;
     return;
   }
 
@@ -213,16 +228,31 @@ void MlevelNestedDissectionP(ctrl_t *ctrl, graph_t *graph, idx_t *order,
     MlevelNestedDissectionP(ctrl, lgraph, order, lastvtx-rgraph->nvtxs, npes, 2*cpos+2, sizes);
   else {
     MMDOrder(ctrl, lgraph, order, lastvtx-rgraph->nvtxs); 
+    if (ctrl->status != METIS_OK) {
+      int saved_errno = errno;
+      FreeGraph(&lgraph);
+      FreeGraph(&rgraph);
+      errno = saved_errno;
+      return;
+    }
     FreeGraph(&lgraph);
   }
   if (ctrl->status != METIS_OK) {
+    int saved_errno = errno;
     FreeGraph(&rgraph);
+    errno = saved_errno;
     return;
   }
   if ((rgraph->nvtxs > MMDSWITCH || 2*cpos+1 < npes-1) && rgraph->nedges > 0) 
     MlevelNestedDissectionP(ctrl, rgraph, order, lastvtx, npes, 2*cpos+1, sizes);
   else {
     MMDOrder(ctrl, rgraph, order, lastvtx); 
+    if (ctrl->status != METIS_OK) {
+      int saved_errno = errno;
+      FreeGraph(&rgraph);
+      errno = saved_errno;
+      return;
+    }
     FreeGraph(&rgraph);
   }
 }
@@ -236,9 +266,11 @@ int METIS_ComputeVertexSeparator(idx_t *nvtxs, idx_t *xadj, idx_t *adjncy,
            idx_t *vwgt, idx_t *options, idx_t *r_sepsize, idx_t *part) 
 {
   volatile int renumber=0, rstatus=METIS_OK, sigrval=0;
+  int saved_errno;
   idx_t numflag, objtype;
   graph_t *graph;
   ctrl_t * volatile ctrl=NULL;
+  ctrl_t *cleanup_ctrl;
 
   if (nvtxs == NULL || r_sepsize == NULL || part == NULL)
     return METIS_ERROR_INPUT;
@@ -254,8 +286,11 @@ int METIS_ComputeVertexSeparator(idx_t *nvtxs, idx_t *xadj, idx_t *adjncy,
     return METIS_ERROR_MEMORY;
 
   if (!gk_sigtrap()) {
+    int saved_errno=errno;
+    rstatus = metis_rcode(metis_sigtrap_error());
     gk_malloc_cleanup(0);
-    return METIS_ERROR_MEMORY;
+    errno = saved_errno;
+    return rstatus;
   }
 
   METIS_SIGCATCH(sigrval);
@@ -263,7 +298,8 @@ int METIS_ComputeVertexSeparator(idx_t *nvtxs, idx_t *xadj, idx_t *adjncy,
     goto SIGTHROW;
 
   rstatus = SetupCtrl(METIS_OP_OMETIS, options, 1, 3, NULL, NULL,
-      (ctrl_t **)&ctrl);
+      &cleanup_ctrl);
+  ctrl = cleanup_ctrl;
   if (rstatus != METIS_OK)
     goto SIGTHROW;
 
@@ -299,18 +335,23 @@ int METIS_ComputeVertexSeparator(idx_t *nvtxs, idx_t *xadj, idx_t *adjncy,
 
   FreeGraph(&graph);
 
-  FreeCtrl((ctrl_t **)&ctrl);
+  cleanup_ctrl = (ctrl_t *)ctrl;
+  FreeCtrl(&cleanup_ctrl);
+  ctrl = cleanup_ctrl;
 
 SIGTHROW:
+  saved_errno = errno;
   if (ctrl != NULL)
     graph_CleanupDiskFiles((ctrl_t *)ctrl);
 
   if (renumber)
     Change2FNumbering2(*nvtxs, xadj, adjncy);
 
-  gk_siguntrap();
+  metis_siguntrap();
   gk_malloc_cleanup(0);
 
+  if (rstatus != METIS_OK || sigrval != 0)
+    errno = saved_errno;
   return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }
 
@@ -365,8 +406,10 @@ int METIS_NodeRefine(idx_t nvtxs, idx_t *xadj, idx_t *vwgt, idx_t *adjncy,
            idx_t *where, idx_t *hmarker, real_t ubfactor)
 {
   volatile int rstatus=METIS_OK, sigrval=0;
+  int saved_errno;
   graph_t *graph;
   ctrl_t * volatile ctrl=NULL;
+  ctrl_t *cleanup_ctrl;
 
   rstatus = ValidateNodeRefinement(nvtxs, xadj, adjncy, vwgt, where,
       hmarker, ubfactor);
@@ -378,8 +421,11 @@ int METIS_NodeRefine(idx_t nvtxs, idx_t *xadj, idx_t *vwgt, idx_t *adjncy,
     return METIS_ERROR_MEMORY;
 
   if (!gk_sigtrap()) {
+    int saved_errno=errno;
+    rstatus = metis_rcode(metis_sigtrap_error());
     gk_malloc_cleanup(0);
-    return METIS_ERROR_MEMORY;
+    errno = saved_errno;
+    return rstatus;
   }
 
   METIS_SIGCATCH(sigrval);
@@ -388,7 +434,8 @@ int METIS_NodeRefine(idx_t nvtxs, idx_t *xadj, idx_t *vwgt, idx_t *adjncy,
 
   /* set up the run time parameters */
   rstatus = SetupCtrl(METIS_OP_OMETIS, NULL, 1, 3, NULL, NULL,
-      (ctrl_t **)&ctrl);
+      &cleanup_ctrl);
+  ctrl = cleanup_ctrl;
   if (rstatus != METIS_OK)
     goto SIGTHROW;
 
@@ -421,15 +468,20 @@ int METIS_NodeRefine(idx_t nvtxs, idx_t *xadj, idx_t *vwgt, idx_t *adjncy,
   icopy(nvtxs, graph->where, where);
 
   FreeGraph(&graph);
-  FreeCtrl((ctrl_t **)&ctrl);
+  cleanup_ctrl = (ctrl_t *)ctrl;
+  FreeCtrl(&cleanup_ctrl);
+  ctrl = cleanup_ctrl;
 
 SIGTHROW:
+  saved_errno = errno;
   if (ctrl != NULL)
     graph_CleanupDiskFiles((ctrl_t *)ctrl);
 
-  gk_siguntrap();
+  metis_siguntrap();
   gk_malloc_cleanup(0);
 
+  if (rstatus != METIS_OK || sigrval != 0)
+    errno = saved_errno;
   return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }
 
@@ -476,17 +528,25 @@ void FM_2WayNodeRefine1SidedP(ctrl_t *ctrl, graph_t *graph,
   mindsize = 2*(size_t)nvtxs;
 
   queue = rpqCreate(nvtxs);
+  if (queue == NULL) {
+    int saved_errno = errno;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
+    WCOREPOP;
+    errno = saved_errno;
+    return;
+  }
       
-  inqueue = iwspacemalloc(ctrl, nvtxs);
-  swaps   = iwspacemalloc(ctrl, nvtxs);
-  mptr    = iwspacemalloc(ctrl, nvtxs+1);
-  mind    = (idx_t *)wspacemalloc(ctrl, mindsize*sizeof(idx_t));
-  if (queue == NULL || inqueue == NULL || swaps == NULL || mptr == NULL ||
-      mind == NULL) {
+  if ((inqueue = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (swaps = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (mptr = iwspacemalloc(ctrl, nvtxs+1)) == NULL ||
+      (mind = (idx_t *)wspacemalloc(ctrl, mindsize*sizeof(idx_t))) == NULL) {
+    int saved_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     if (queue != NULL)
       rpqDestroy(queue);
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
   iset(nvtxs, -1, inqueue);
@@ -726,20 +786,30 @@ void FM_2WayNodeRefine2SidedP(ctrl_t *ctrl, graph_t *graph,
   mindsize = 2*(size_t)nvtxs;
 
   queues[0] = rpqCreate(nvtxs);
-  queues[1] = rpqCreate(nvtxs);
+  queues[1] = queues[0] != NULL ? rpqCreate(nvtxs) : NULL;
+  if (queues[0] == NULL || queues[1] == NULL) {
+    int saved_errno = errno;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
+    if (queues[0] != NULL)
+      rpqDestroy(queues[0]);
+    WCOREPOP;
+    errno = saved_errno;
+    return;
+  }
 
-  moved = iwspacemalloc(ctrl, nvtxs);
-  swaps = iwspacemalloc(ctrl, nvtxs);
-  mptr  = iwspacemalloc(ctrl, nvtxs+1);
-  mind  = (idx_t *)wspacemalloc(ctrl, mindsize*sizeof(idx_t));
-  if (queues[0] == NULL || queues[1] == NULL || moved == NULL ||
-      swaps == NULL || mptr == NULL || mind == NULL) {
+  if ((moved = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (swaps = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (mptr = iwspacemalloc(ctrl, nvtxs+1)) == NULL ||
+      (mind = (idx_t *)wspacemalloc(ctrl, mindsize*sizeof(idx_t))) == NULL) {
+    int saved_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     if (queues[0] != NULL)
       rpqDestroy(queues[0]);
     if (queues[1] != NULL)
       rpqDestroy(queues[1]);
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -990,6 +1060,7 @@ int METIS_CacheFriendlyReordering(idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
            idx_t *part, idx_t *old2new) 
 {
   volatile int rstatus=METIS_OK, sigrval=0;
+  int saved_errno;
   idx_t degree, i, j, k, first, last, lastlevel, maxdegree, nparts;
   idx_t *cot, *pos, *pwgts;
   ikv_t *levels;
@@ -1019,8 +1090,11 @@ int METIS_CacheFriendlyReordering(idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
     return METIS_ERROR_MEMORY;
 
   if (!gk_sigtrap()) {
+    int saved_errno=errno;
+    rstatus = metis_rcode(metis_sigtrap_error());
     gk_malloc_cleanup(0);
-    return METIS_ERROR_MEMORY;
+    errno = saved_errno;
+    return rstatus;
   }
 
   METIS_SIGCATCH(sigrval);
@@ -1133,8 +1207,11 @@ int METIS_CacheFriendlyReordering(idx_t nvtxs, idx_t *xadj, idx_t *adjncy,
   gk_free((void **)&cot, &pos, &levels, &pwgts, LTERM);
 
 SIGTHROW:
-  gk_siguntrap();
+  saved_errno = errno;
+  metis_siguntrap();
   gk_malloc_cleanup(0);
 
+  if (rstatus != METIS_OK || sigrval != 0)
+    errno = saved_errno;
   return rstatus == METIS_OK ? metis_rcode(sigrval) : rstatus;
 }

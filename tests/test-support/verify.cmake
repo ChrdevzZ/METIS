@@ -140,6 +140,14 @@ endif()
 if(GENERATOR_TOOLSET)
   list(APPEND generator_args -T "${GENERATOR_TOOLSET}")
 endif()
+if(TEST_CONFIG AND GENERATOR MATCHES "Multi-Config|Visual Studio|Xcode")
+  list(APPEND generator_args "-DCMAKE_CONFIGURATION_TYPES=${TEST_CONFIG}")
+endif()
+
+set(ctest_config)
+if(TEST_CONFIG)
+  list(APPEND ctest_config -C "${TEST_CONFIG}")
+endif()
 
 set(native_build "${work}/native")
 run_checked("configure native runtime fixture"
@@ -147,7 +155,7 @@ run_checked("configure native runtime fixture"
   ${generator_args})
 execute_process(
   COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${native_build}"
-    --output-on-failure
+    ${ctest_config} --output-on-failure
   RESULT_VARIABLE native_result
   OUTPUT_VARIABLE native_output
   ERROR_VARIABLE native_error)
@@ -163,7 +171,7 @@ run_checked("configure runtime output fixture"
   ${generator_args} -DTEST_OUTPUT_TOKEN=ON)
 execute_process(
   COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${output_build}"
-    --output-on-failure
+    ${ctest_config} --output-on-failure
   RESULT_VARIABLE output_result
   OUTPUT_VARIABLE output_output
   ERROR_VARIABLE output_error)
@@ -181,7 +189,7 @@ run_checked("configure cross fixture without emulator"
   ${generator_args} "-DCMAKE_TOOLCHAIN_FILE=${no_emulator_toolchain}")
 execute_process(
   COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${no_emulator_build}"
-    --output-on-failure
+    ${ctest_config} --output-on-failure
   RESULT_VARIABLE skip_result
   OUTPUT_VARIABLE skip_output
   ERROR_VARIABLE skip_error)
@@ -198,7 +206,7 @@ run_checked("configure cross fixture with a missing target"
   -DTEST_MISSING_TARGET=ON)
 execute_process(
   COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${missing_build}"
-    --output-on-failure
+    ${ctest_config} --output-on-failure
   RESULT_VARIABLE missing_result
   OUTPUT_VARIABLE missing_output
   ERROR_VARIABLE missing_error)
@@ -225,7 +233,101 @@ run_checked("configure cross fixture with emulator"
   -DTEST_SUCCESS=ON)
 run_checked("emulated runtime"
   "${CMAKE_CTEST_COMMAND}" --test-dir "${emulator_build}"
-  --output-on-failure)
+  ${ctest_config} --output-on-failure)
 if(NOT EXISTS "${recorder}")
   message(FATAL_ERROR "Configured emulator was not invoked")
+endif()
+
+# Repeated final-link probes must use current flags and leave parent state intact.
+set(wrap_source "${work}/wrap-fixture")
+file(MAKE_DIRECTORY "${wrap_source}")
+string(TOUPPER "${FUNCTION_PREFIX}" WRAP_UPPER)
+if(FUNCTION_PREFIX STREQUAL "metis")
+  set(WRAP_MISSING metis_test_missing)
+else()
+  set(WRAP_MISSING gklib_frame_probe_missing)
+endif()
+file(CONFIGURE OUTPUT "${wrap_source}/CMakeLists.txt" CONTENT [=[
+cmake_minimum_required(VERSION 3.24)
+project(TestLinkWrap LANGUAGES C)
+include("@MODULE_FILE@")
+if(TEST_WRAP_CUSTOM_CONFIG)
+  set(CMAKE_CONFIGURATION_TYPES Review CACHE STRING "Fixture configurations" FORCE)
+  set(CMAKE_TRY_COMPILE_CONFIGURATION Review)
+elseif(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Review)
+endif()
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+set(CMAKE_REQUIRED_FLAGS parent-check-sentinel)
+set(CMAKE_REQUIRED_LIBRARIES parent-library-sentinel)
+set(@WRAP_UPPER@_TEST_WRAP_PARENT parent-cache-sentinel CACHE STRING "Parent result")
+set(parent_platform "${CMAKE_TRY_COMPILE_PLATFORM_VARIABLES}")
+set(parent_configuration "${CMAKE_TRY_COMPILE_CONFIGURATION}")
+get_cmake_property(before CACHE_VARIABLES)
+@FUNCTION_PREFIX@_test_check_link_wrap(supported)
+file(COPY "${CMAKE_BINARY_DIR}/link-wrap/link.log"
+  DESTINATION "${CMAKE_BINARY_DIR}/initial")
+if(supported)
+  set(config "${CMAKE_TRY_COMPILE_CONFIGURATION}")
+  if(NOT config)
+    if(CMAKE_CONFIGURATION_TYPES)
+      list(GET CMAKE_CONFIGURATION_TYPES 0 config)
+    else()
+      set(config "${CMAKE_BUILD_TYPE}")
+    endif()
+  endif()
+  string(TOUPPER "${config}" upper)
+  set(flags "${CMAKE_C_FLAGS_${upper}}")
+  set(CMAKE_C_FLAGS_${upper}
+    "${flags} -D@WRAP_MISSING@=test_wrap_renamed_reference")
+  @FUNCTION_PREFIX@_test_check_link_wrap(changed)
+  file(COPY "${CMAKE_BINARY_DIR}/link-wrap/link.log"
+    DESTINATION "${CMAKE_BINARY_DIR}/changed-flags")
+  if(changed)
+    message(FATAL_ERROR "Probe reused a result after active flags changed")
+  endif()
+  set(CMAKE_C_FLAGS_${upper} "${flags}")
+  @FUNCTION_PREFIX@_test_check_link_wrap(restored)
+  if(NOT restored STREQUAL supported)
+    message(FATAL_ERROR "Restored flags did not restore wrapping capability")
+  endif()
+endif()
+if(NOT CMAKE_CROSSCOMPILING)
+  set(emulator "${CMAKE_CROSSCOMPILING_EMULATOR}")
+  set(CMAKE_CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;false")
+  @FUNCTION_PREFIX@_test_check_link_wrap(native_emulator)
+  set(CMAKE_CROSSCOMPILING_EMULATOR "${emulator}")
+  if(NOT native_emulator STREQUAL supported)
+    message(FATAL_ERROR "Native emulator changed wrapping capability")
+  endif()
+endif()
+get_cmake_property(after CACHE_VARIABLES)
+if(NOT CMAKE_TRY_COMPILE_TARGET_TYPE STREQUAL "STATIC_LIBRARY" OR
+    NOT CMAKE_REQUIRED_FLAGS STREQUAL "parent-check-sentinel" OR
+    NOT CMAKE_REQUIRED_LIBRARIES STREQUAL "parent-library-sentinel" OR
+    NOT @WRAP_UPPER@_TEST_WRAP_PARENT STREQUAL "parent-cache-sentinel" OR
+    NOT "${CMAKE_TRY_COMPILE_PLATFORM_VARIABLES}" STREQUAL "${parent_platform}" OR
+    NOT "${CMAKE_TRY_COMPILE_CONFIGURATION}" STREQUAL "${parent_configuration}")
+  message(FATAL_ERROR "Wrapping probe changed parent check state")
+endif()
+foreach(entry IN LISTS after)
+  if(entry MATCHES "^@WRAP_UPPER@_TEST_WRAP_" AND NOT entry IN_LIST before)
+    message(FATAL_ERROR "Wrapping probe left a temporary cache result")
+  endif()
+endforeach()
+if(DEFINED TEST_WRAP_EXPECTED AND NOT supported STREQUAL TEST_WRAP_EXPECTED)
+  message(FATAL_ERROR "Custom configuration changed wrapping capability")
+endif()
+file(WRITE "${CMAKE_BINARY_DIR}/wrap-supported.txt" "${supported}")
+message(STATUS "Verified repeated wrapping capability: ${supported}")
+]=] @ONLY NEWLINE_STYLE LF)
+run_checked("configure repeated wrapping probe under an archive-only parent"
+  "${CMAKE_COMMAND}" -S "${wrap_source}" -B "${work}/wrap-build"
+  -C "${TEST_INITIAL_CACHE}" ${generator_args})
+if(GENERATOR MATCHES "Multi-Config|Visual Studio|Xcode")
+  file(READ "${work}/wrap-build/wrap-supported.txt" expected)
+  run_checked("configure wrapping probe with a custom configuration"
+    "${CMAKE_COMMAND}" -S "${wrap_source}" -B "${work}/wrap-custom-build"
+    -C "${TEST_INITIAL_CACHE}" ${generator_args}
+    -DTEST_WRAP_CUSTOM_CONFIG=ON "-DTEST_WRAP_EXPECTED=${expected}")
 endif()

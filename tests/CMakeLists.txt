@@ -17,7 +17,7 @@ set_tests_properties(metis.api-invalid-dimensions PROPERTIES TIMEOUT 30)
 add_executable(metis_coarsen_numeric coarsen_numeric.c)
 target_include_directories(metis_coarsen_numeric PRIVATE
   "${PROJECT_SOURCE_DIR}/src")
-target_link_libraries(metis_coarsen_numeric PRIVATE METIS::metis
+target_link_libraries(metis_coarsen_numeric PRIVATE ${metis_private_library}
   GKlib::GKlib)
 metis_test_add_runtime(NAME metis.coarsen-numeric TARGET metis_coarsen_numeric)
 set_tests_properties(metis.coarsen-numeric PROPERTIES TIMEOUT 30)
@@ -39,7 +39,7 @@ set_tests_properties(metis.numbering-failure PROPERTIES TIMEOUT 30)
 add_executable(metis_ondisk_file_security ondisk_file_security.c)
 target_include_directories(metis_ondisk_file_security PRIVATE
   "${PROJECT_SOURCE_DIR}/src")
-target_link_libraries(metis_ondisk_file_security PRIVATE METIS::metis
+target_link_libraries(metis_ondisk_file_security PRIVATE ${metis_private_library}
   GKlib::GKlib)
 metis_test_add_runtime(NAME metis.ondisk-file-security
   TARGET metis_ondisk_file_security)
@@ -50,29 +50,155 @@ set_tests_properties(metis.ondisk-file-security PROPERTIES TIMEOUT 30)
 add_executable(metis_workspace_failure workspace_failure.c)
 target_include_directories(metis_workspace_failure PRIVATE
   "${PROJECT_SOURCE_DIR}/src")
-target_link_libraries(metis_workspace_failure PRIVATE METIS::metis
+target_link_libraries(metis_workspace_failure PRIVATE ${metis_private_library}
   GKlib::GKlib)
 metis_test_add_runtime(NAME metis.workspace-failure
   TARGET metis_workspace_failure)
 set_tests_properties(metis.workspace-failure PROPERTIES TIMEOUT 30)
 
-# GNU's linker wrapping lets this fixture fail each allocator call without
-# adding test hooks to the production constructors.
-if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND NOT METIS_BUILD_SHARED_LIBS)
-  add_executable(metis_constructor_failure constructor_failure.c)
+# Wrapping crosses object-file references in static libraries, not calls bound
+# inside a shared library. Probe the selected final linker independently of
+# compiler brand; the fixtures also check that injection reaches real calls.
+get_target_property(_metis_test_gklib_type GKlib::GKlib TYPE)
+set(_metis_test_link_wrap FALSE)
+if(NOT METIS_BUILD_SHARED_LIBS AND
+    _metis_test_gklib_type STREQUAL "STATIC_LIBRARY")
+  metis_test_check_link_wrap(_metis_test_link_wrap)
+endif()
+if(_metis_test_link_wrap)
+  file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/fault-gklib-$<CONFIG>.txt"
+    CONTENT "$<TARGET_FILE:GKlib::GKlib>")
+endif()
+
+# IPO may bind calls before symbol wrapping. Test the same sources in a
+# separate non-IPO producer while retaining the production target policy.
+set(_metis_test_ipo FALSE)
+foreach(_target IN ITEMS metis GKlib::GKlib)
+  foreach(_config IN ITEMS "" ${CMAKE_BUILD_TYPE} ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER "${_config}" _upper)
+    set(_property INTERPROCEDURAL_OPTIMIZATION)
+    if(NOT _config STREQUAL "")
+      string(APPEND _property "_${_upper}")
+    endif()
+    get_target_property(_enabled ${_target} ${_property})
+    if(_enabled)
+      set(_metis_test_ipo TRUE)
+    endif()
+  endforeach()
+endforeach()
+get_target_property(_metis_test_gklib_imported GKlib::GKlib IMPORTED)
+if(_metis_test_link_wrap AND _metis_test_ipo AND
+    (NOT _metis_test_gklib_imported OR metis_gklib_package_dir))
+  set(_gklib_source "")
+  set(_gklib_package "")
+  if(_metis_test_gklib_imported)
+    set(_gklib_package "${metis_gklib_package_dir}")
+    message(STATUS "METIS wrapping tests rebuild METIS without IPO; the installed GKlib archive is unchanged")
+  else()
+    get_target_property(_gklib_source GKlib::GKlib SOURCE_DIR)
+    get_filename_component(_gklib_source "${_gklib_source}" DIRECTORY)
+    message(STATUS "METIS wrapping tests use a separate non-IPO source producer")
+  endif()
+  set(_metis_fault_cases constructor-failure stat-failure frame-setup-cleanup
+    release-failure cli-linked-frame-failure)
+  if(NOT WIN32)
+    list(APPEND _metis_fault_cases posix-query-failure)
+  endif()
+  foreach(_case IN LISTS _metis_fault_cases)
+    add_test(NAME metis.${_case}
+      COMMAND "${CMAKE_COMMAND}"
+        "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DGKLIB_SOURCE_DIR=${_gklib_source}"
+        "-DGKLIB_PACKAGE_DIR=${_gklib_package}"
+        "-DGKLIB_EXPECTED_ARCHIVE=$<TARGET_FILE:GKlib::GKlib>"
+        "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/fault-producer/$<CONFIG>"
+        "-DTEST_INITIAL_CACHE=${_metis_test_initial_cache}"
+        "-DGENERATOR=${CMAKE_GENERATOR}"
+        "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
+        "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+        "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+        "-DTEST_CONFIG=$<CONFIG>" "-DCASE=${_case}"
+        "-DTEST_CROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+        "-DTEST_EMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
+        "-DIDXTYPEWIDTH=${METIS_IDXTYPEWIDTH}"
+        "-DREALTYPEWIDTH=${METIS_REALTYPEWIDTH}"
+        "-DMETIS_ASSERTIONS=${METIS_ASSERTIONS}"
+        "-DMETIS_ASSERTIONS_EXPENSIVE=${METIS_ASSERTIONS_EXPENSIVE}"
+        "-DMETIS_DEBUG=${METIS_DEBUG}"
+        "-DMETIS_NATIVE_OPTIMIZATION=${METIS_NATIVE_OPTIMIZATION}"
+        "-DMETIS_GPROF=${METIS_GPROF}"
+        "-DMETIS_WARNINGS_AS_ERRORS=${METIS_WARNINGS_AS_ERRORS}"
+        "-DMETIS_SANITIZERS=${METIS_SANITIZERS}"
+        "-DGKLIB_ASSERTIONS=${GKLIB_ASSERTIONS}"
+        "-DGKLIB_ASSERTIONS_EXPENSIVE=${GKLIB_ASSERTIONS_EXPENSIVE}"
+        "-DGKLIB_DEBUG=${GKLIB_DEBUG}"
+        "-DGKLIB_USE_GKRAND=${GKLIB_USE_GKRAND}"
+        "-DGKLIB_NO_X86=${GKLIB_NO_X86}"
+        "-DGKLIB_NATIVE_OPTIMIZATION=${GKLIB_NATIVE_OPTIMIZATION}"
+        "-DGKLIB_GPROF=${GKLIB_GPROF}"
+        "-DGKLIB_WARNINGS_AS_ERRORS=${GKLIB_WARNINGS_AS_ERRORS}"
+        "-DGKLIB_THREAD_LOCAL_STORAGE=${GKLIB_THREAD_LOCAL_STORAGE}"
+        "-DGKLIB_REGEX_BACKEND=${GKLIB_REGEX_BACKEND}"
+        "-DGKLIB_OPENMP=${GKLIB_OPENMP}"
+        "-DGKLIB_SANITIZERS=${GKLIB_SANITIZERS}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/fault_producer.cmake")
+    set_tests_properties(metis.${_case} PROPERTIES
+      TIMEOUT 300 RESOURCE_LOCK metis_fault_producer)
+    if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+      set_tests_properties(metis.${_case} PROPERTIES
+        SKIP_REGULAR_EXPRESSION "^METIS_RUNTIME_SKIPPED: no cross-compiling emulator")
+    endif()
+  endforeach()
+elseif(_metis_test_link_wrap)
+  if(_metis_test_ipo)
+    message(STATUS "METIS wrapping tests cannot recreate this imported GKlib target; direct injection assertions remain active")
+  endif()
+  add_executable(metis_constructor_failure constructor_failure.c
+    "${PROJECT_SOURCE_DIR}/apps/io.c")
   target_include_directories(metis_constructor_failure PRIVATE
-    "${PROJECT_SOURCE_DIR}/src")
+    "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/apps")
   target_link_libraries(metis_constructor_failure PRIVATE METIS::metis
     GKlib::GKlib)
   target_link_options(metis_constructor_failure PRIVATE
-    "-Wl,--wrap=gk_malloc"
-    "-Wl,--wrap=gk_malloc_nosignal"
-    "-Wl,--wrap=gk_mcoreMalloc"
-    "-Wl,--wrap=malloc"
-    "-Wl,--wrap=free")
+    "LINKER:--wrap=gk_malloc"
+    "LINKER:--wrap=gk_malloc_nosignal"
+    "LINKER:--wrap=gk_mcoreMalloc"
+    "LINKER:--wrap=gk_mcoreCreate"
+    "LINKER:--wrap=gk_mcorePop"
+    "LINKER:--wrap=METIS_PartGraphRecursive"
+    "LINKER:--wrap=gk_sigtrap"
+    "LINKER:--wrap=gk_siguntrap"
+    "LINKER:--wrap=malloc"
+    "LINKER:--wrap=calloc"
+    "LINKER:--wrap=free")
+  if(NOT WIN32)
+    find_package(Threads REQUIRED)
+    target_compile_definitions(metis_constructor_failure PRIVATE
+      METIS_TEST_POSIX_QUERY _POSIX_C_SOURCE=200809L)
+    target_link_libraries(metis_constructor_failure PRIVATE Threads::Threads)
+    target_link_options(metis_constructor_failure PRIVATE
+      "LINKER:--wrap=pthread_sigmask")
+  endif()
   metis_test_add_runtime(NAME metis.constructor-failure
     TARGET metis_constructor_failure)
   set_tests_properties(metis.constructor-failure PROPERTIES TIMEOUT 30)
+  metis_test_add_runtime(NAME metis.frame-setup-cleanup
+    TARGET metis_constructor_failure ARGS frame-cleanup)
+  set_tests_properties(metis.frame-setup-cleanup PROPERTIES TIMEOUT 30)
+  metis_test_add_runtime(NAME metis.cli-linked-frame-failure
+    TARGET metis_constructor_failure ARGS cli-frame-failure)
+  set_tests_properties(metis.cli-linked-frame-failure PROPERTIES TIMEOUT 30)
+  foreach(_mode IN ITEMS 0 1)
+    metis_test_add_runtime(NAME metis.release-failure.${_mode}
+      TARGET metis_constructor_failure ARGS release-failure ${_mode}
+      EXPECT_FAILURE)
+    set_tests_properties(metis.release-failure.${_mode} PROPERTIES TIMEOUT 30)
+  endforeach()
+  if(NOT WIN32)
+    metis_test_add_runtime(NAME metis.posix-query-failure
+      TARGET metis_constructor_failure ARGS posix-query)
+    set_tests_properties(metis.posix-query-failure PROPERTIES TIMEOUT 30)
+  endif()
   metis_copy_runtime(metis_constructor_failure)
 
   add_executable(metis_stat_failure stat_failure.c
@@ -81,20 +207,52 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND NOT METIS_BUILD_SHARED_LIBS)
     "${PROJECT_SOURCE_DIR}/apps" "${PROJECT_SOURCE_DIR}/src")
   target_link_libraries(metis_stat_failure PRIVATE METIS::metis
     GKlib::GKlib)
-  target_link_options(metis_stat_failure PRIVATE "-Wl,--wrap=gk_malloc")
+  target_link_options(metis_stat_failure PRIVATE
+    "LINKER:--wrap=gk_malloc" "LINKER:--wrap=free")
   metis_test_add_runtime(NAME metis.stat-failure TARGET metis_stat_failure)
   set_tests_properties(metis.stat-failure PROPERTIES TIMEOUT 30)
   metis_copy_runtime(metis_stat_failure)
+else()
+  message(STATUS "METIS allocator wrapping tests unavailable: require static METIS/GKlib and a verified wrapping linker")
 endif()
 
 add_executable(metis_smbfactor_failure smbfactor_failure.c)
 target_include_directories(metis_smbfactor_failure PRIVATE
   "${PROJECT_SOURCE_DIR}/apps" "${PROJECT_SOURCE_DIR}/src")
-target_link_libraries(metis_smbfactor_failure PRIVATE METIS::metis
+target_link_libraries(metis_smbfactor_failure PRIVATE ${metis_private_library}
   GKlib::GKlib)
 metis_test_add_runtime(NAME metis.smbfactor-failure
   TARGET metis_smbfactor_failure)
 set_tests_properties(metis.smbfactor-failure PROPERTIES TIMEOUT 30)
+
+# Existing stream and symbolic-factorization fixtures inject allocation errors;
+# this fixture targets failed frame establishment in all private CLI owners.
+set_property(SOURCE cli_frame_failure.c PROPERTY OBJECT_DEPENDS
+  "${PROJECT_SOURCE_DIR}/apps/io.c"
+  "${PROJECT_SOURCE_DIR}/apps/smbfactor.c"
+  "${PROJECT_SOURCE_DIR}/apps/cmpfillin.c")
+foreach(_owner IN ITEMS io factor fillin)
+  set(_target "metis_cli_frame_${_owner}_failure")
+  add_executable(${_target} cli_frame_failure.c)
+  target_include_directories(${_target} PRIVATE
+    "${PROJECT_SOURCE_DIR}/apps" "${PROJECT_SOURCE_DIR}/src")
+  target_link_libraries(${_target} PRIVATE ${metis_private_library} GKlib::GKlib)
+  set_target_properties(${_target} PROPERTIES
+    C_STANDARD 99 C_STANDARD_REQUIRED YES C_EXTENSIONS YES)
+  string(TOUPPER "${_owner}" _upper)
+  target_compile_definitions(${_target} PRIVATE "METIS_CLI_FRAME_${_upper}")
+  if(_owner STREQUAL "fillin")
+    target_sources(${_target} PRIVATE
+      "${PROJECT_SOURCE_DIR}/apps/io.c" "${PROJECT_SOURCE_DIR}/apps/smbfactor.c")
+  endif()
+  if(MSVC OR CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    target_compile_definitions(${_target} PRIVATE _CRT_SECURE_NO_WARNINGS)
+  endif()
+  metis_test_add_runtime(NAME "metis.cli-frame-failure.${_owner}"
+    TARGET ${_target} WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+  set_tests_properties("metis.cli-frame-failure.${_owner}" PROPERTIES TIMEOUT 30)
+  metis_copy_runtime(${_target})
+endforeach()
 
 # Compile the application I/O unit with private failpoints for stream,
 # allocation, close, commit and rollback errors.
@@ -104,7 +262,7 @@ target_compile_definitions(metis_output_pair_failure PRIVATE
   METIS_IO_TRANSACTION_TEST)
 target_include_directories(metis_output_pair_failure PRIVATE
   "${PROJECT_SOURCE_DIR}/apps" "${PROJECT_SOURCE_DIR}/src")
-target_link_libraries(metis_output_pair_failure PRIVATE METIS::metis
+target_link_libraries(metis_output_pair_failure PRIVATE ${metis_private_library}
   GKlib::GKlib)
 metis_test_add_runtime(NAME metis.output-pair-failure
   TARGET metis_output_pair_failure)
@@ -245,9 +403,11 @@ if(METIS_BUILD_INTEGRATION_TESTING)
       "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-support"
       "-DGENERATOR=${CMAKE_GENERATOR}"
       "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+      "-DTEST_INITIAL_CACHE=${_metis_test_initial_cache}"
       "-DGENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
       "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
       "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DTEST_CONFIG=$<CONFIG>"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/test-support/verify.cmake")
   set_tests_properties(metis.test-support PROPERTIES TIMEOUT 120)
 

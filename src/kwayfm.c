@@ -59,6 +59,7 @@ void Greedy_KWayOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
 void Greedy_KWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter, 
          real_t ffactor, idx_t omode)
 {
+  int saved_errno;
   /* Common variables to all types of kway-refinement/balancing routines */
   idx_t i, ii, iii, j, k, l, pass, nvtxs, nparts, gain; 
   idx_t from, me, to, oldcut, vwgt;
@@ -98,9 +99,11 @@ void Greedy_KWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
 
   /* Setup the weight intervals of the various subdomains */
   minpwgts = iwspacemalloc(ctrl, nparts);
-  maxpwgts = iwspacemalloc(ctrl, nparts);
+  maxpwgts = minpwgts != NULL ? iwspacemalloc(ctrl, nparts) : NULL;
   if (minpwgts == NULL || maxpwgts == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -115,9 +118,11 @@ void Greedy_KWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   }
 
   perm    = iwspacemalloc(ctrl, nvtxs);
-  safetos = iwspacemalloc(ctrl, nparts);
+  safetos = perm != NULL ? iwspacemalloc(ctrl, nparts) : NULL;
   if (perm == NULL || safetos == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -131,7 +136,9 @@ void Greedy_KWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   if (ctrl->minconn) {
     ComputeSubDomainGraph(ctrl, graph);
     if (ctrl->status != METIS_OK) {
+      int cleanup_errno = errno;
       WCOREPOP;
+      errno = cleanup_errno;
       return;
     }
 
@@ -145,10 +152,12 @@ void Greedy_KWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   /* Setup updptr, updind like boundary info to keep track of the vertices whose
      vstatus's need to be reset at the end of the inner iteration */
   vstatus = iwspacemalloc(ctrl, nvtxs);
-  updptr  = iwspacemalloc(ctrl, nvtxs);
-  updind  = iwspacemalloc(ctrl, nvtxs);
+  updptr  = vstatus != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  updind  = updptr != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
   if (vstatus == NULL || updptr == NULL || updind == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   iset(nvtxs, VPQSTATUS_NOTPRESENT, vstatus);
@@ -157,10 +166,12 @@ void Greedy_KWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   if (ctrl->contig) {
     /* The arrays that will be used for limited check of articulation points */
     bfslvl = iwspacemalloc(ctrl, nvtxs);
-    bfsind = iwspacemalloc(ctrl, nvtxs);
-    bfsmrk = iwspacemalloc(ctrl, nvtxs);
+    bfsind = bfslvl != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+    bfsmrk = bfsind != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
     if (bfslvl == NULL || bfsind == NULL || bfsmrk == NULL) {
+      int cleanup_errno = errno;
       WCOREPOP;
+      errno = cleanup_errno;
       return;
     }
     iset(nvtxs, 0, bfslvl);
@@ -181,8 +192,11 @@ void Greedy_KWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
 
   queue = rpqCreate(nvtxs);
   if (queue == NULL) {
-    ctrl->status = METIS_ERROR_MEMORY;
+    int saved_errno = errno;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -398,11 +412,17 @@ void Greedy_KWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
     }
 
     if (ctrl->dbglvl&METIS_DBG_REFINE) {
+      idx_t volume = ComputeVolume(graph, where);
+      if (volume < 0) {
+        if (ctrl->status == METIS_OK)
+          ctrl->status = metis_errno_error();
+        goto ERROR;
+      }
        printf("\t[%6"PRIDX" %6"PRIDX"], Bal: %5.3"PRREAL", Nb: %6"PRIDX"."
               " Nmoves: %5"PRIDX", Cut: %6"PRIDX", Vol: %6"PRIDX,
               pwgts[iargmin(nparts, pwgts,1)], imax(nparts, pwgts,1),
               ComputeLoadImbalance(graph, nparts, ctrl->pijbm), 
-              graph->nbnd, nmoved, graph->mincut, ComputeVolume(graph, where));
+              graph->nbnd, nmoved, graph->mincut, volume);
        if (ctrl->minconn) 
          printf(", Doms: [%3"PRIDX" %4"PRIDX"]", imax(nparts, nads,1), isum(nparts, nads,1));
        printf("\n");
@@ -418,8 +438,10 @@ void Greedy_KWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   return;
 
 ERROR:
+  saved_errno = errno;
   rpqDestroy(queue);
   WCOREPOP;
+  errno = saved_errno;
 }
 
 
@@ -437,6 +459,7 @@ ERROR:
 void Greedy_KWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter, 
          real_t ffactor, idx_t omode)
 {
+  int saved_errno;
   /* Common variables to all types of kway-refinement/balancing routines */
   idx_t i, ii, iii, j, k, l, pass, nvtxs, nparts, gain; 
   idx_t from, me, to, oldcut, vwgt;
@@ -472,9 +495,11 @@ void Greedy_KWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
 
   /* Setup the weight intervals of the various subdomains */
   minpwgts  = iwspacemalloc(ctrl, nparts);
-  maxpwgts  = iwspacemalloc(ctrl, nparts);
+  maxpwgts  = minpwgts != NULL ? iwspacemalloc(ctrl, nparts) : NULL;
   if (minpwgts == NULL || maxpwgts == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -486,9 +511,11 @@ void Greedy_KWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   }
 
   perm    = iwspacemalloc(ctrl, nvtxs);
-  safetos = iwspacemalloc(ctrl, nparts);
+  safetos = perm != NULL ? iwspacemalloc(ctrl, nparts) : NULL;
   if (perm == NULL || safetos == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -502,7 +529,9 @@ void Greedy_KWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   if (ctrl->minconn) {
     ComputeSubDomainGraph(ctrl, graph);
     if (ctrl->status != METIS_OK) {
+      int cleanup_errno = errno;
       WCOREPOP;
+      errno = cleanup_errno;
       return;
     }
 
@@ -516,10 +545,12 @@ void Greedy_KWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   /* Setup updptr, updind like boundary info to keep track of the vertices whose
      vstatus's need to be reset at the end of the inner iteration */
   vstatus = iwspacemalloc(ctrl, nvtxs);
-  updptr  = iwspacemalloc(ctrl, nvtxs);
-  updind  = iwspacemalloc(ctrl, nvtxs);
+  updptr  = vstatus != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  updind  = updptr != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
   if (vstatus == NULL || updptr == NULL || updind == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   iset(nvtxs, VPQSTATUS_NOTPRESENT, vstatus);
@@ -528,10 +559,12 @@ void Greedy_KWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   if (ctrl->contig) {
     /* The arrays that will be used for limited check of articulation points */
     bfslvl = iwspacemalloc(ctrl, nvtxs);
-    bfsind = iwspacemalloc(ctrl, nvtxs);
-    bfsmrk = iwspacemalloc(ctrl, nvtxs);
+    bfsind = bfslvl != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+    bfsmrk = bfsind != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
     if (bfslvl == NULL || bfsind == NULL || bfsmrk == NULL) {
+      int cleanup_errno = errno;
       WCOREPOP;
+      errno = cleanup_errno;
       return;
     }
     iset(nvtxs, 0, bfslvl);
@@ -540,10 +573,12 @@ void Greedy_KWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
 
   /* Vol-refinement specific working arrays */
   modind  = iwspacemalloc(ctrl, nvtxs);
-  vmarker = iwspacemalloc(ctrl, nvtxs);
-  pmarker = iwspacemalloc(ctrl, nparts);
+  vmarker = modind != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  pmarker = vmarker != NULL ? iwspacemalloc(ctrl, nparts) : NULL;
   if (modind == NULL || vmarker == NULL || pmarker == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   iset(nvtxs, 0, vmarker);
@@ -563,8 +598,11 @@ void Greedy_KWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
 
   queue = ipqCreate(nvtxs);
   if (queue == NULL) {
-    ctrl->status = METIS_ERROR_MEMORY;
+    int saved_errno = errno;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -573,7 +611,17 @@ void Greedy_KWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   * The top-level refinement loop 
   *======================================================================*/
   for (pass=0; pass<niter; pass++) {
-    ASSERT(ComputeVolume(graph, where) == graph->minvol);
+#if GKLIB_ASSERTIONS_ENABLED
+    {
+      idx_t volume = ComputeVolume(graph, where);
+      if (volume < 0) {
+        if (ctrl->status == METIS_OK)
+          ctrl->status = metis_errno_error();
+        goto ERROR;
+      }
+      ASSERT(volume == graph->minvol);
+    }
+#endif
 
     if (omode == OMODE_BALANCE) {
       /* Check to see if things are out of balance, given the tolerance */
@@ -779,8 +827,10 @@ void Greedy_KWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   return;
 
 ERROR:
+  saved_errno = errno;
   ipqDestroy(queue);
   WCOREPOP;
+  errno = saved_errno;
 }
 
 
@@ -803,6 +853,7 @@ ERROR:
 void Greedy_McKWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter, 
          real_t ffactor, idx_t omode)
 {
+  int saved_errno;
   /* Common variables to all types of kway-refinement/balancing routines */
   idx_t i, ii, iii, j, k, l, pass, nvtxs, ncon, nparts, gain; 
   idx_t from, me, to, cto, oldcut;
@@ -849,7 +900,9 @@ void Greedy_McKWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
      and the user-specified ones. */
   ubfactors = rwspacemalloc(ctrl, ncon);
   if (ubfactors == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   ComputeLoadImbalanceVec(graph, nparts, pijbm, ubfactors);
@@ -865,9 +918,11 @@ void Greedy_McKWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
 
   /* Setup the weight intervals of the various subdomains */
   minpwgts  = iwspacemalloc(ctrl, nparts*ncon);
-  maxpwgts  = iwspacemalloc(ctrl, nparts*ncon);
+  maxpwgts  = minpwgts != NULL ? iwspacemalloc(ctrl, nparts*ncon) : NULL;
   if (minpwgts == NULL || maxpwgts == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -882,9 +937,11 @@ void Greedy_McKWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   }
 
   perm    = iwspacemalloc(ctrl, nvtxs);
-  safetos = iwspacemalloc(ctrl, nparts);
+  safetos = perm != NULL ? iwspacemalloc(ctrl, nparts) : NULL;
   if (perm == NULL || safetos == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -898,7 +955,9 @@ void Greedy_McKWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   if (ctrl->minconn) {
     ComputeSubDomainGraph(ctrl, graph);
     if (ctrl->status != METIS_OK) {
+      int cleanup_errno = errno;
       WCOREPOP;
+      errno = cleanup_errno;
       return;
     }
 
@@ -912,10 +971,12 @@ void Greedy_McKWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   /* Setup updptr, updind like boundary info to keep track of the vertices whose
      vstatus's need to be reset at the end of the inner iteration */
   vstatus = iwspacemalloc(ctrl, nvtxs);
-  updptr  = iwspacemalloc(ctrl, nvtxs);
-  updind  = iwspacemalloc(ctrl, nvtxs);
+  updptr  = vstatus != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  updind  = updptr != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
   if (vstatus == NULL || updptr == NULL || updind == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   iset(nvtxs, VPQSTATUS_NOTPRESENT, vstatus);
@@ -924,10 +985,12 @@ void Greedy_McKWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   if (ctrl->contig) {
     /* The arrays that will be used for limited check of articulation points */
     bfslvl = iwspacemalloc(ctrl, nvtxs);
-    bfsind = iwspacemalloc(ctrl, nvtxs);
-    bfsmrk = iwspacemalloc(ctrl, nvtxs);
+    bfsind = bfslvl != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+    bfsmrk = bfsind != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
     if (bfslvl == NULL || bfsind == NULL || bfsmrk == NULL) {
+      int cleanup_errno = errno;
       WCOREPOP;
+      errno = cleanup_errno;
       return;
     }
     iset(nvtxs, 0, bfslvl);
@@ -948,8 +1011,11 @@ void Greedy_McKWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
 
   queue = rpqCreate(nvtxs);
   if (queue == NULL) {
-    ctrl->status = METIS_ERROR_MEMORY;
+    int saved_errno = errno;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -1158,11 +1224,17 @@ void Greedy_McKWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
     }
 
     if (ctrl->dbglvl&METIS_DBG_REFINE) {
+      idx_t volume = ComputeVolume(graph, where);
+      if (volume < 0) {
+        if (ctrl->status == METIS_OK)
+          ctrl->status = metis_errno_error();
+        goto ERROR;
+      }
        printf("\t[%6"PRIDX" %6"PRIDX"], Bal: %5.3"PRREAL", Nb: %6"PRIDX"."
               " Nmoves: %5"PRIDX", Cut: %6"PRIDX", Vol: %6"PRIDX,
               imin(nparts*ncon, pwgts,1), imax(nparts*ncon, pwgts,1), 
               ComputeLoadImbalance(graph, nparts, pijbm), 
-              graph->nbnd, nmoved, graph->mincut, ComputeVolume(graph, where));
+              graph->nbnd, nmoved, graph->mincut, volume);
        if (ctrl->minconn) 
          printf(", Doms: [%3"PRIDX" %4"PRIDX"]", imax(nparts, nads,1), isum(nparts, nads,1));
        printf("\n");
@@ -1178,8 +1250,10 @@ void Greedy_McKWayCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   return;
 
 ERROR:
+  saved_errno = errno;
   rpqDestroy(queue);
   WCOREPOP;
+  errno = saved_errno;
 }
 
 
@@ -1197,6 +1271,7 @@ ERROR:
 void Greedy_McKWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter, 
          real_t ffactor, idx_t omode)
 {
+  int saved_errno;
   /* Common variables to all types of kway-refinement/balancing routines */
   idx_t i, ii, iii, j, k, l, pass, nvtxs, ncon, nparts, gain; 
   idx_t from, me, to, cto, oldcut;
@@ -1240,7 +1315,9 @@ void Greedy_McKWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
      and the user-specified ones. */
   ubfactors = rwspacemalloc(ctrl, ncon);
   if (ubfactors == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   ComputeLoadImbalanceVec(graph, nparts, pijbm, ubfactors);
@@ -1256,9 +1333,11 @@ void Greedy_McKWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
 
   /* Setup the weight intervals of the various subdomains */
   minpwgts  = iwspacemalloc(ctrl, nparts*ncon);
-  maxpwgts  = iwspacemalloc(ctrl, nparts*ncon);
+  maxpwgts  = minpwgts != NULL ? iwspacemalloc(ctrl, nparts*ncon) : NULL;
   if (minpwgts == NULL || maxpwgts == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -1273,9 +1352,11 @@ void Greedy_McKWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   }
 
   perm    = iwspacemalloc(ctrl, nvtxs);
-  safetos = iwspacemalloc(ctrl, nparts);
+  safetos = perm != NULL ? iwspacemalloc(ctrl, nparts) : NULL;
   if (perm == NULL || safetos == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -1289,7 +1370,9 @@ void Greedy_McKWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   if (ctrl->minconn) {
     ComputeSubDomainGraph(ctrl, graph);
     if (ctrl->status != METIS_OK) {
+      int cleanup_errno = errno;
       WCOREPOP;
+      errno = cleanup_errno;
       return;
     }
 
@@ -1303,10 +1386,12 @@ void Greedy_McKWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   /* Setup updptr, updind like boundary info to keep track of the vertices whose
      vstatus's need to be reset at the end of the inner iteration */
   vstatus = iwspacemalloc(ctrl, nvtxs);
-  updptr  = iwspacemalloc(ctrl, nvtxs);
-  updind  = iwspacemalloc(ctrl, nvtxs);
+  updptr  = vstatus != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  updind  = updptr != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
   if (vstatus == NULL || updptr == NULL || updind == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   iset(nvtxs, VPQSTATUS_NOTPRESENT, vstatus);
@@ -1315,10 +1400,12 @@ void Greedy_McKWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   if (ctrl->contig) {
     /* The arrays that will be used for limited check of articulation points */
     bfslvl = iwspacemalloc(ctrl, nvtxs);
-    bfsind = iwspacemalloc(ctrl, nvtxs);
-    bfsmrk = iwspacemalloc(ctrl, nvtxs);
+    bfsind = bfslvl != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+    bfsmrk = bfsind != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
     if (bfslvl == NULL || bfsind == NULL || bfsmrk == NULL) {
+      int cleanup_errno = errno;
       WCOREPOP;
+      errno = cleanup_errno;
       return;
     }
     iset(nvtxs, 0, bfslvl);
@@ -1327,10 +1414,12 @@ void Greedy_McKWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
 
   /* Vol-refinement specific working arrays */
   modind  = iwspacemalloc(ctrl, nvtxs);
-  vmarker = iwspacemalloc(ctrl, nvtxs);
-  pmarker = iwspacemalloc(ctrl, nparts);
+  vmarker = modind != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  pmarker = vmarker != NULL ? iwspacemalloc(ctrl, nparts) : NULL;
   if (modind == NULL || vmarker == NULL || pmarker == NULL) {
+    int cleanup_errno = errno;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   iset(nvtxs, 0, vmarker);
@@ -1350,8 +1439,11 @@ void Greedy_McKWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
 
   queue = ipqCreate(nvtxs);
   if (queue == NULL) {
-    ctrl->status = METIS_ERROR_MEMORY;
+    int saved_errno = errno;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -1360,7 +1452,17 @@ void Greedy_McKWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   * The top-level refinement loop 
   *======================================================================*/
   for (pass=0; pass<niter; pass++) {
-    ASSERT(ComputeVolume(graph, where) == graph->minvol);
+#if GKLIB_ASSERTIONS_ENABLED
+    {
+      idx_t volume = ComputeVolume(graph, where);
+      if (volume < 0) {
+        if (ctrl->status == METIS_OK)
+          ctrl->status = metis_errno_error();
+        goto ERROR;
+      }
+      ASSERT(volume == graph->minvol);
+    }
+#endif
 
     /* In balancing mode, exit as soon as balance is reached */
     if (omode == OMODE_BALANCE && IsBalanced(ctrl, graph, 0))
@@ -1575,8 +1677,10 @@ void Greedy_McKWayVolOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter,
   return;
 
 ERROR:
+  saved_errno = errno;
   ipqDestroy(queue);
   WCOREPOP;
+  errno = saved_errno;
 }
 
 
@@ -1689,6 +1793,7 @@ void KWayVolUpdate(ctrl_t *ctrl, graph_t *graph, idx_t v, idx_t from,
          idx_t *updind, idx_t bndtype, idx_t *vmarker, idx_t *pmarker, 
          idx_t *modind)
 {
+  int saved_errno;
   idx_t i, ii, iii, j, jj, k, kk, l, u, nmod, other, me, myidx; 
   idx_t *xadj, *vsize, *adjncy, *where;
   vkrinfo_t *myrinfo, *orinfo;
@@ -2096,6 +2201,7 @@ void KWayVolUpdate(ctrl_t *ctrl, graph_t *graph, idx_t v, idx_t from,
   return;
 
 MEMORY_ERROR:
+  saved_errno = errno;
   for (j=xadj[v]; j<xadj[v+1]; j++) {
     ii = adjncy[j];
     if (vmarker[ii] == 2)
@@ -2103,6 +2209,7 @@ MEMORY_ERROR:
     vmarker[ii] = 0;
   }
   ctrl->nbrpoolcpos = oldcpos;
+  errno = saved_errno;
 }
 
 
@@ -2451,11 +2558,20 @@ void Greedy_KWayEdgeCutOptimize(ctrl_t *ctrl, graph_t *graph, idx_t niter)
     graph->nbnd = nbnd;
 
     if (ctrl->dbglvl&METIS_DBG_REFINE) {
+      idx_t volume = ComputeVolume(graph, where);
+      if (volume < 0) {
+        int saved_errno = errno;
+        if (ctrl->status == METIS_OK)
+          ctrl->status = metis_errno_error();
+        WCOREPOP;
+        errno = saved_errno;
+        return;
+      }
        printf("\t[%6"PRIDX" %6"PRIDX"], Bal: %5.3"PRREAL", Nb: %6"PRIDX"."
               " Nmoves: %5"PRIDX", Cut: %6"PRIDX", Vol: %6"PRIDX"\n",
               pwgts[iargmin(nparts, pwgts,1)], imax(nparts, pwgts,1),
               ComputeLoadImbalance(graph, nparts, ctrl->pijbm), 
-              graph->nbnd, nmoved, graph->mincut, ComputeVolume(graph, where));
+              graph->nbnd, nmoved, graph->mincut, volume);
     }
 
     if (nmoved == 0 || graph->mincut == oldcut)

@@ -20,6 +20,7 @@ int SetupCtrl(moptype_et optype, idx_t *options, idx_t ncon, idx_t nparts,
   volatile int sigrval=0;
   idx_t i, j;
   ctrl_t *cleanup_ctrl;
+  int saved_errno;
   ctrl_t * volatile ctrl=NULL;
 
   if (r_ctrl == NULL)
@@ -41,10 +42,8 @@ int SetupCtrl(moptype_et optype, idx_t *options, idx_t ncon, idx_t nparts,
     return METIS_ERROR_MEMORY;
   }
 
-  if (!gk_sigtrap()) {
-    errno = ENOMEM;
-    return METIS_ERROR_MEMORY;
-  }
+  if (!gk_sigtrap())
+    return metis_rcode(metis_sigtrap_error());
   METIS_SIGCATCH(sigrval);
   if (sigrval != 0)
     goto SIGNAL_ERROR;
@@ -176,13 +175,13 @@ int SetupCtrl(moptype_et optype, idx_t *options, idx_t ncon, idx_t nparts,
   }
 
   *r_ctrl = (ctrl_t *)ctrl;
-  gk_siguntrap();
+  metis_siguntrap();
   return METIS_OK;
 
 INPUT_ERROR:
   cleanup_ctrl = (ctrl_t *)ctrl;
   ctrl = NULL;
-  gk_siguntrap();
+  metis_siguntrap();
   FreeCtrl(&cleanup_ctrl);
   errno = EINVAL;
   return METIS_ERROR_INPUT;
@@ -191,10 +190,12 @@ MEMORY_ERROR:
   sigrval = SIGMEM;
 
 SIGNAL_ERROR:
+  saved_errno = errno;
   cleanup_ctrl = (ctrl_t *)ctrl;
   ctrl = NULL;
-  gk_siguntrap();
+  metis_siguntrap();
   FreeCtrl(&cleanup_ctrl);
+  errno = saved_errno;
   if (errno == 0)
     errno = sigrval == SIGMEM ? ENOMEM : EINVAL;
   if (sigrval != SIGMEM)

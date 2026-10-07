@@ -85,11 +85,12 @@ void Bnd2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
   bndptr = graph->bndptr;
   bndind = graph->bndind;
 
-  moved = iwspacemalloc(ctrl, nvtxs);
-  perm  = iwspacemalloc(ctrl, nvtxs);
-  if (moved == NULL || perm == NULL) {
+  if ((moved = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (perm = iwspacemalloc(ctrl, nvtxs)) == NULL) {
+    int saved_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -107,8 +108,11 @@ void Bnd2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
 
   queue = rpqCreate(nvtxs);
   if (queue == NULL) {
-    ctrl->status = METIS_ERROR_MEMORY;
+    int saved_errno = errno;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -224,11 +228,12 @@ void General2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
   bndptr = graph->bndptr;
   bndind = graph->bndind;
 
-  moved = iwspacemalloc(ctrl, nvtxs);
-  perm  = iwspacemalloc(ctrl, nvtxs);
-  if (moved == NULL || perm == NULL) {
+  if ((moved = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (perm = iwspacemalloc(ctrl, nvtxs)) == NULL) {
+    int saved_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -245,8 +250,11 @@ void General2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
 
   queue = rpqCreate(nvtxs);
   if (queue == NULL) {
-    ctrl->status = METIS_ERROR_MEMORY;
+    int saved_errno = errno;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -350,17 +358,17 @@ void McGeneral2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
   bndptr   = graph->bndptr;
   bndind   = graph->bndind;
 
-  moved   = iwspacemalloc(ctrl, nvtxs);
-  swaps   = iwspacemalloc(ctrl, nvtxs);
-  perm    = iwspacemalloc(ctrl, nvtxs);
-  qnum    = iwspacemalloc(ctrl, nvtxs);
-  newbalv = rwspacemalloc(ctrl, ncon);
-  minbalv = rwspacemalloc(ctrl, ncon);
-  qsizes  = iwspacemalloc(ctrl, 2*ncon);
-  if (moved == NULL || swaps == NULL || perm == NULL || qnum == NULL ||
-      newbalv == NULL || minbalv == NULL || qsizes == NULL) {
+  if ((moved = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (swaps = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (perm = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (qnum = iwspacemalloc(ctrl, nvtxs)) == NULL ||
+      (newbalv = rwspacemalloc(ctrl, ncon)) == NULL ||
+      (minbalv = rwspacemalloc(ctrl, ncon)) == NULL ||
+      (qsizes = iwspacemalloc(ctrl, 2*ncon)) == NULL) {
+    int saved_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -369,17 +377,22 @@ void McGeneral2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
   /* Initialize the queues */
   queues = (rpq_t **)wspacemalloc(ctrl, 2*ncon*sizeof(rpq_t *));
   if (queues == NULL) {
+    int saved_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
   for (i=0; i<2*ncon; i++) {
     queues[i] = rpqCreate(nvtxs);
     if (queues[i] == NULL) {
-      ctrl->status = METIS_ERROR_MEMORY;
+      int saved_errno = errno;
+      if (ctrl->status == METIS_OK)
+        ctrl->status = metis_errno_error();
       while (i>0)
         rpqDestroy(queues[--i]);
       WCOREPOP;
+      errno = saved_errno;
       return;
     }
     qsizes[i] = 0;
@@ -559,4 +572,3 @@ void McGeneral2WayBalance(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts)
 
   WCOREPOP;
 }
-

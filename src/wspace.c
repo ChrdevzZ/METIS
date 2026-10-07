@@ -105,19 +105,20 @@ int AllocateWorkSpace(ctrl_t *ctrl, graph_t *graph)
     return METIS_ERROR_MEMORY;
   }
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
-    ctrl->status = METIS_ERROR_MEMORY;
-    return METIS_ERROR_MEMORY;
+    if (ctrl->status >= 0)
+      ctrl->status = metis_rcode(metis_sigtrap_error());
+    return ctrl->status;
   }
   METIS_SIGCATCH(sigrval);
   if (sigrval == 0)
     new_mcore = gk_mcoreCreate(coresize);
-  gk_siguntrap();
+  metis_siguntrap();
   if (sigrval != 0 || new_mcore == NULL) {
     if (errno == 0)
       errno = ENOMEM;
-    ctrl->status = METIS_ERROR_MEMORY;
-    return METIS_ERROR_MEMORY;
+    if (ctrl->status >= 0)
+      ctrl->status = sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
+    return ctrl->status;
   }
 
   old_mcore = ctrl->mcore;
@@ -150,6 +151,7 @@ int AllocateRefinementWorkSpace(ctrl_t *ctrl, idx_t nbrpoolsize_max,
   idx_t ** volatile adids=NULL, ** volatile adwgts=NULL;
   idx_t i;
   size_t part_count, poolsize;
+  int saved_errno;
 
   if (ctrl == NULL || ctrl->nparts <= 0 || nbrpoolsize_max < 0 ||
       nbrpoolsize < 0 ||
@@ -187,9 +189,9 @@ int AllocateRefinementWorkSpace(ctrl_t *ctrl, idx_t nbrpoolsize_max,
   }
 
   if (!gk_sigtrap()) {
-    errno = ENOMEM;
-    ctrl->status = METIS_ERROR_MEMORY;
-    return METIS_ERROR_MEMORY;
+    if (ctrl->status >= 0)
+      ctrl->status = metis_rcode(metis_sigtrap_error());
+    return ctrl->status;
   }
   METIS_SIGCATCH(sigrval);
   if (sigrval != 0)
@@ -235,7 +237,7 @@ int AllocateRefinementWorkSpace(ctrl_t *ctrl, idx_t nbrpoolsize_max,
       goto FAILURE;
   }
 
-  gk_siguntrap();
+  metis_siguntrap();
 
   if (ctrl->adids != NULL)
     iFreeMatrix(&ctrl->adids, ctrl->nparts, INIT_MAXNAD);
@@ -261,6 +263,7 @@ int AllocateRefinementWorkSpace(ctrl_t *ctrl, idx_t nbrpoolsize_max,
   return METIS_OK;
 
 FAILURE:
+  saved_errno = errno;
   cleanup_cnbrpool = (cnbr_t *)cnbrpool;
   cleanup_vnbrpool = (vnbr_t *)vnbrpool;
   cleanup_cnbrsqrt = (double *)cnbrsqrt;
@@ -277,11 +280,12 @@ FAILURE:
   gk_free((void **)&cleanup_cnbrpool, &cleanup_vnbrpool, &cleanup_cnbrsqrt,
       &cleanup_pvec1, &cleanup_pvec2, &cleanup_maxnads, &cleanup_nads,
       LTERM);
-  gk_siguntrap();
-  if (errno == 0)
-    errno = ENOMEM;
-  ctrl->status = METIS_ERROR_MEMORY;
-  return METIS_ERROR_MEMORY;
+  metis_siguntrap();
+  errno = saved_errno != 0 ? saved_errno :
+      (sigrval == SIGERR ? EINVAL : ENOMEM);
+  if (ctrl->status >= 0)
+    ctrl->status = sigrval == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
+  return ctrl->status;
 }
 
 

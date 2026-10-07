@@ -20,7 +20,7 @@
 **************************************************************************/
 void ComputePartitionInfoBipartite(graph_t *graph, idx_t nparts, idx_t *where)
 {
-  idx_t i, j, k, nvtxs, ncon, mustfree=0;
+  idx_t i, j, k, nvtxs, ncon, volume, mustfree=0;
   idx_t *xadj, *adjncy, *vwgt, *vsize, *adjwgt, *kpwgts, *tmpptr;
   idx_t *padjncy, *padjwgt, *padjcut;
 
@@ -32,6 +32,10 @@ void ComputePartitionInfoBipartite(graph_t *graph, idx_t nparts, idx_t *where)
   vsize = graph->vsize;
   adjwgt = graph->adjwgt;
 
+  volume = ComputeVolume(graph, where);
+  if (volume < 0)
+    return;
+
   if (vwgt == NULL) {
     vwgt = graph->vwgt = ismalloc(nvtxs, 1, "vwgt");
     mustfree = 1;
@@ -41,7 +45,7 @@ void ComputePartitionInfoBipartite(graph_t *graph, idx_t nparts, idx_t *where)
     mustfree += 2;
   }
 
-  printf("%"PRIDX"-way Cut: %5"PRIDX", Vol: %5"PRIDX", ", nparts, ComputeCut(graph, where), ComputeVolume(graph, where));
+  printf("%"PRIDX"-way Cut: %5"PRIDX", Vol: %5"PRIDX", ", nparts, ComputeCut(graph, where), volume);
 
   /* Compute balance information */
   kpwgts = ismalloc(ncon*nparts, 0, "ComputePartitionInfo: kpwgts");

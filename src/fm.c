@@ -52,8 +52,14 @@ void FM_2WayCutRefine(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, idx_t niter
   bndind = graph->bndind;
 
   moved = iwspacemalloc(ctrl, nvtxs);
-  swaps = iwspacemalloc(ctrl, nvtxs);
-  perm  = iwspacemalloc(ctrl, nvtxs);
+  swaps = moved != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  perm  = swaps != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  if (moved == NULL || swaps == NULL || perm == NULL) {
+    int cleanup_errno = errno;
+    WCOREPOP;
+    errno = cleanup_errno;
+    return;
+  }
 
   tpwgts[0] = graph->tvwgt[0]*ntpwgts[0];
   tpwgts[1] = graph->tvwgt[0]-tpwgts[0];
@@ -67,15 +73,15 @@ void FM_2WayCutRefine(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, idx_t niter
   }
 
   queues[0] = rpqCreate(nvtxs);
-  queues[1] = rpqCreate(nvtxs);
-  if (moved == NULL || swaps == NULL || perm == NULL ||
-      queues[0] == NULL || queues[1] == NULL) {
-    ctrl->status = METIS_ERROR_MEMORY;
+  queues[1] = queues[0] != NULL ? rpqCreate(nvtxs) : NULL;
+  if (queues[0] == NULL || queues[1] == NULL) {
+    int saved_errno = errno;
+    if (ctrl->status == METIS_OK)
+      ctrl->status = metis_errno_error();
     if (queues[0] != NULL)
       rpqDestroy(queues[0]);
-    if (queues[1] != NULL)
-      rpqDestroy(queues[1]);
     WCOREPOP;
+    errno = saved_errno;
     return;
   }
 
@@ -253,16 +259,18 @@ void FM_Mc2WayCutRefine(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, idx_t nit
   bndind   = graph->bndind;
 
   moved     = iwspacemalloc(ctrl, nvtxs);
-  swaps     = iwspacemalloc(ctrl, nvtxs);
-  perm      = iwspacemalloc(ctrl, nvtxs);
-  qnum      = iwspacemalloc(ctrl, nvtxs);
-  ubfactors = rwspacemalloc(ctrl, ncon);
-  newbalv   = rwspacemalloc(ctrl, ncon);
-  minbalv   = rwspacemalloc(ctrl, ncon);
+  swaps     = moved != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  perm      = swaps != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  qnum      = perm != NULL ? iwspacemalloc(ctrl, nvtxs) : NULL;
+  ubfactors = qnum != NULL ? rwspacemalloc(ctrl, ncon) : NULL;
+  newbalv   = ubfactors != NULL ? rwspacemalloc(ctrl, ncon) : NULL;
+  minbalv   = newbalv != NULL ? rwspacemalloc(ctrl, ncon) : NULL;
   if (moved == NULL || swaps == NULL || perm == NULL || qnum == NULL ||
       ubfactors == NULL || newbalv == NULL || minbalv == NULL) {
+    int cleanup_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
 
@@ -276,17 +284,22 @@ void FM_Mc2WayCutRefine(ctrl_t *ctrl, graph_t *graph, real_t *ntpwgts, idx_t nit
   /* Initialize the queues */
   queues = (rpq_t **)wspacemalloc(ctrl, 2*ncon*sizeof(rpq_t *));
   if (queues == NULL) {
+    int cleanup_errno = errno;
     ctrl->status = METIS_ERROR_MEMORY;
     WCOREPOP;
+    errno = cleanup_errno;
     return;
   }
   for (i=0; i<2*ncon; i++) {
     queues[i] = rpqCreate(nvtxs);
     if (queues[i] == NULL) {
-      ctrl->status = METIS_ERROR_MEMORY;
+      int saved_errno = errno;
+      if (ctrl->status == METIS_OK)
+        ctrl->status = metis_errno_error();
       while (i>0)
         rpqDestroy(queues[--i]);
       WCOREPOP;
+      errno = saved_errno;
       return;
     }
   }

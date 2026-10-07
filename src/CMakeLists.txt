@@ -13,23 +13,20 @@ else()
 endif()
 add_library(METIS::metis ALIAS metis)
 
-# Preserve ownership across the private application and GKlib DLL interfaces.
-include("${PROJECT_SOURCE_DIR}/cmake/MetisCRT.cmake")
-metis_check_crt(metis)
-
-if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "IntelLLVM")
-  intel_runtime_link(metis)
+set(metis_library_targets metis)
+set(metis_private_library METIS::metis)
+get_target_property(metis_gklib_type GKlib::GKlib TYPE)
+if(WIN32 AND METIS_BUILD_SHARED_LIBS AND
+    metis_gklib_type STREQUAL "STATIC_LIBRARY" AND
+    (METIS_BUILD_PROGRAMS OR METIS_BUILD_TESTING))
+  # Private clients must share one GKlib recovery and allocation instance.
+  # Linking the DLL and another static GKlib would split that state.
+  add_library(metis_private STATIC ${metis_sources})
+  target_compile_definitions(metis_private PUBLIC METIS_STATIC_DEFINE)
+  list(APPEND metis_library_targets metis_private)
+  set(metis_private_library metis_private)
 endif()
-
-# Only the generated public headers are visible to downstream consumers.
-target_include_directories(metis
-  PUBLIC $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
-         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(metis PRIVATE GKlib::GKlib)
-if(METIS_MATH_LIBRARY)
-  target_link_libraries(metis PRIVATE "${METIS_MATH_LIBRARY}")
-endif()
+set(metis_private_library "${metis_private_library}" PARENT_SCOPE)
 
 set_target_properties(metis PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 5
   WINDOWS_EXPORT_ALL_SYMBOLS OFF)
@@ -37,17 +34,33 @@ if(MINGW AND METIS_BUILD_SHARED_LIBS)
   # The CLI and Fortran wrappers also use symbols outside the public C API.
   target_link_options(metis PRIVATE -Wl,--export-all-symbols)
 endif()
-if(NOT DEFINED CMAKE_POSITION_INDEPENDENT_CODE)
-  set_property(TARGET metis PROPERTY POSITION_INDEPENDENT_CODE ON)
-endif()
-
 include(GenerateExportHeader)
 generate_export_header(metis EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/include/metis_export.h")
 if(NOT METIS_BUILD_SHARED_LIBS)
   target_compile_definitions(metis PUBLIC METIS_STATIC_DEFINE)
 endif()
 
-metis_target_options(metis)
+# Only the canonical library is installed. Private clients use the same source,
+# generated configuration, CRT and target policy through the companion archive.
+include("${PROJECT_SOURCE_DIR}/cmake/MetisCRT.cmake")
+foreach(library IN LISTS metis_library_targets)
+  metis_check_crt(${library})
+  if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "IntelLLVM")
+    intel_runtime_link(${library})
+  endif()
+  target_include_directories(${library}
+    PUBLIC $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(${library} PRIVATE GKlib::GKlib)
+  if(METIS_MATH_LIBRARY)
+    target_link_libraries(${library} PRIVATE "${METIS_MATH_LIBRARY}")
+  endif()
+  if(NOT DEFINED CMAKE_POSITION_INDEPENDENT_CODE)
+    set_property(TARGET ${library} PROPERTY POSITION_INDEPENDENT_CODE ON)
+  endif()
+  metis_target_options(${library})
+endforeach()
 
 if(METIS_INSTALL)
   install(TARGETS metis EXPORT METISTargets
