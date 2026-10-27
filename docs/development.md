@@ -19,8 +19,39 @@ tool regressions. Run the upstream mapping audit explicitly when changing
 source provenance; it is not a prerequisite for building or testing a source
 archive, which may not contain the recorded Git objects.
 
+When `METIS_SANITIZERS` is requested, owned build-tree fixture translation
+units receive private sanitizer instrumentation and their own final-link runtime
+closure. This includes controlled source-inclusion fixtures and public templates;
+it does not apply the production warning, assertion or IPO policy to tests.
+Windows executable runtime deployment also covers fixtures that deliberately do
+not link the real library. AddressSanitizer builds register standalone diagnostic
+controls that require a startup marker and the expected heap-buffer-overflow.
+Installed package consumers and unrelated parent targets retain plain compile
+options so they continue to check interface isolation. Wrapping gates and separate
+non-IPO producers retain their existing injection and state-ownership contracts.
+
 Nested runtime fixtures pass the selected configuration to both the child
 configuration list and CTest, including custom multi-config configurations.
+
+Link-capability caches distinguish the effective C or C++ standard, required
+standard and extension mode, including unset and explicit OFF values. Cache
+misses run in the helper's captured policy scope so prior inclusion of a CMake
+check module cannot change the language mode being tested. The standard-cache
+fixtures exercise same-configure and reconfigure transitions with fresh negative
+controls; native MSVC probes use `_MSVC_LANG` for C++ mode checks.
+
+Private GKlib probe modules come from the resolved source target or an explicitly
+paired SOURCE directory. Installed packages need not contain those modules.
+`tests/probes/probe-availability.json` in the binary tree records each expected
+probe name, registration status and reason when a source helper is unavailable.
+
+Separate fault producers load toolchain inputs from their initial cache, then
+literal project policy from a generated cache, then their explicit `-D` overrides.
+This preserves sanitizer lists, empty values and OFF while keeping child IPO OFF
+and leaving the parent policy intact. The fault-cache regressions exercise this
+actual configuration path and API runtime separately from wrapping injection;
+an unsupported sanitizer combination is reported as unavailable after verifying
+the complete child request.
 
 ```sh
 python tools/upstream.py check
@@ -279,3 +310,16 @@ owning `src/`, `include/` and `apps/` directories.
 
 Shared instructions are in [AGENTS.md](../AGENTS.md). See [agent setup](agents.md)
 for discovery and [architecture](architecture.md) for code orientation.
+
+Strict release-failure subprocesses also require a closed, per-run hit file
+written only by the armed wrapper. Their unarmed matching operation must first
+succeed in the same process. This separates an injected production failure from
+an unrelated silent failure exit without changing the checked stdout/stderr.
+The hit files remain in the test binary directory for evidence collection.
+Healthy preparation before strict termination is not recovery after termination.
+
+`metis.cache-frame-cleanup` separately calibrates frame establishment through
+`METIS_CacheFriendlyReordering`, injects resource/general failures, and checks
+first errno, live outer ownership, stopped allocations and a healthy permutation
+in the same process. It uses the existing verified wrapping and non-IPO producer
+boundaries; it does not extend the large-graph frame-cleanup runtime budget.

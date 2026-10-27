@@ -7,6 +7,7 @@
  */
 
 #include "../apps/metisbin.h"
+#include "failure_hit.h"
 #ifdef METIS_TEST_POSIX_QUERY
 #include <pthread.h>
 #endif
@@ -33,6 +34,7 @@ static size_t trap_count, trap_fail_at, cleanup_clobbers;
 static size_t heap_workspace_hits, heap_pop_clobbers;
 static int query_ncon=1, query_edge_separator, query_minconn;
 static int release_failure;
+static const char *release_hit_path;
 #ifdef METIS_TEST_POSIX_QUERY
 static int SameQueryMask(const sigset_t *left, const sigset_t *right);
 int __real_pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset);
@@ -180,6 +182,7 @@ int __wrap_gk_sigtrap(void)
 int __wrap_gk_siguntrap(void)
 {
   if (release_failure && gk_cur_jbufs == 0) {
+    record_failure_hit(release_hit_path);
     errno = EIO;
     return 0;
   }
@@ -1876,6 +1879,23 @@ static int RunQueryAPI(int api, int objtype, int debug)
   else if (api == 8)
     status = METIS_ComputeVertexSeparator(&nvtxs, pxadj, padjncy,
         NULL, options, &obj, part);
+  else if (api == 11) {
+    idx_t cachepart[]={0, 0, 1, 1};
+    status = METIS_CacheFriendlyReordering(nvtxs, pxadj, padjncy,
+        cachepart, iperm);
+    if (cachepart[0] != 0 || cachepart[1] != 0 ||
+        cachepart[2] != 1 || cachepart[3] != 1)
+      status = METIS_ERROR_INPUT;
+    if (status == METIS_OK) {
+      idx_t i, seen[4]={0, 0, 0, 0};
+      for (i=0; i<nvtxs; i++) {
+        if (iperm[i] < 0 || iperm[i] >= nvtxs || seen[iperm[i]]++) {
+          status = METIS_ERROR_INPUT;
+          break;
+        }
+      }
+    }
+  }
   else
     status = METIS_NodeRefine(nvtxs, pxadj, NULL, padjncy,
         refined, hmarker, (real_t)1.05);
@@ -1907,7 +1927,7 @@ static int RunQueryAPI(int api, int objtype, int debug)
           status = METIS_ERROR_INPUT;
       }
     }
-    if (status == METIS_OK && api >= 8) {
+    if (status == METIS_OK && (api == 8 || api == 9)) {
       idx_t *where = api == 8 ? part : refined;
       for (i=0; i<nvtxs; i++) {
         if (where[i] < 0 || where[i] > 2)
@@ -2034,6 +2054,30 @@ static int CheckFrameCleanupFailures(void)
   printf("Controlled frame cleanup cases: %zu, errno-clobbering frees: %zu\n",
       cases, frees);
   return cases != 0 && frees != 0 ? 0 : 3;
+}
+
+
+/* Keep this bounded owner separate from the existing large-graph test budget. */
+static int CheckCacheFrameFailures(void)
+{
+  int errors[]={EIO, ENOMEM, EOVERFLOW}, mode;
+  size_t i, total, nth, observed, clobbers, cases=0;
+
+  if (CheckFrameCleanup(11, METIS_OBJTYPE_NODE, 0, SIZE_MAX, 0, EIO,
+      &total, &clobbers) != 0 || total == 0)
+    return 1;
+  for (nth=1; nth<=total; nth++) {
+    for (mode=0; mode<2; mode++) {
+      for (i=0; i<sizeof(errors)/sizeof(errors[0]); i++) {
+        if (CheckFrameCleanup(11, METIS_OBJTYPE_NODE, 0, nth, mode,
+            errors[i], &observed, &clobbers) != 0)
+          return 2;
+        cases++;
+      }
+    }
+  }
+  printf("Cache-friendly frame cleanup cases: %zu\n", cases);
+  return 0;
 }
 
 
@@ -2681,7 +2725,7 @@ static void ReleaseAbortHandler(int signum)
 }
 
 
-static int CheckReleaseFailure(int mode)
+static int CheckReleaseFailure(int mode, const char *hit_path)
 {
   idx_t nvtxs=2, ncon=1, nparts=1, objval=-1;
   idx_t xadj[3]={0, 1, 2}, adjncy[2]={1, 0}, part[2]={-1, -1};
@@ -2693,6 +2737,14 @@ static int CheckReleaseFailure(int mode)
   AllowAllocations();
   gk_set_exit_on_error(mode);
   METIS_SetDefaultOptions(options);
+  /* Prove preparation and the same API are healthy before arming the wrapper. */
+  if (gk_cur_jbufs != -1 || gk_GetCurMemoryUsed() != 0 ||
+      METIS_PartGraphKway(&nvtxs, &ncon, xadj, adjncy, NULL, NULL, NULL,
+          &nparts, NULL, NULL, options, &objval, part) != METIS_OK ||
+      objval != 0 || part[0] != 0 || part[1] != 0 ||
+      gk_cur_jbufs != -1 || gk_GetCurMemoryUsed() != 0)
+    return EXIT_SUCCESS;
+  release_hit_path = hit_path;
   release_failure = 1;
   METIS_PartGraphKway(&nvtxs, &ncon, xadj, adjncy, NULL, NULL, NULL,
       &nparts, NULL, NULL, options, &objval, part);
@@ -2709,8 +2761,10 @@ int main(int argc, char *argv[])
     return EXIT_FAILURE;
   if (argc == 2 && strcmp(argv[1], "cli-frame-failure") == 0)
     return CheckCLIFrameFailures();
-  if (argc == 3 && strcmp(argv[1], "release-failure") == 0)
-    return CheckReleaseFailure(atoi(argv[2]));
+  if (argc == 4 && strcmp(argv[1], "release-failure") == 0)
+    return CheckReleaseFailure(atoi(argv[2]), argv[3]);
+  if (argc == 2 && strcmp(argv[1], "cache-frame-cleanup") == 0)
+    return CheckCacheFrameFailures();
   if (argc == 2 && strcmp(argv[1], "workspace") == 0)
     return CheckWorkspaceFailures();
   if (argc == 2 && strcmp(argv[1], "prepared-scratch") == 0)

@@ -51,6 +51,14 @@
   },
   "files": [
     {
+      "baseline_blob": null,
+      "id": "metis-local-tests-failure-hit-h",
+      "kind": "local",
+      "local_path": "tests/failure_hit.h",
+      "notes": "Fork-local closed hit side channel for strict failure subprocess assertions; no production failpoint or upstream counterpart.",
+      "upstream_path": null
+    },
+    {
       "baseline_blob": "feb77dee26acc2ab2a2aa5497a0e09d71da7b044",
       "id": "metis-build-windows-txt",
       "kind": "modified",
@@ -564,6 +572,14 @@
     },
     {
       "baseline_blob": null,
+      "id": "metis-local-cmake-metissanitizers-cmake",
+      "kind": "local",
+      "local_path": "cmake/MetisSanitizers.cmake",
+      "notes": "Fork-local target sanitizer policy.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
       "id": "metis-local-cmake-recordinstall-cmake-in",
       "kind": "local",
       "local_path": "cmake/RecordInstall.cmake.in",
@@ -648,6 +664,38 @@
       "kind": "local",
       "local_path": "tests/exports.c",
       "notes": "Local source with no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-fault-cache-literal-cmakelists-txt",
+      "kind": "local",
+      "local_path": "tests/fault-cache/literal/CMakeLists.txt",
+      "notes": "Local regression or direct support for language-mode cache, source-provider or literal fault-policy contracts.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-fault-cache-parent-cmakelists-txt",
+      "kind": "local",
+      "local_path": "tests/fault-cache/parent/CMakeLists.txt",
+      "notes": "Local regression or direct support for language-mode cache, source-provider or literal fault-policy contracts.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-fault-cache-verify-cmake",
+      "kind": "local",
+      "local_path": "tests/fault-cache/verify.cmake",
+      "notes": "Local regression or direct support for language-mode cache, source-provider or literal fault-policy contracts.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-faultoptions-cmake",
+      "kind": "local",
+      "local_path": "tests/FaultOptions.cmake",
+      "notes": "Local regression or direct support for language-mode cache, source-provider or literal fault-policy contracts.",
       "upstream_path": null
     },
     {
@@ -756,10 +804,42 @@
     },
     {
       "baseline_blob": null,
+      "id": "metis-local-tests-probes-run-standards-cmake",
+      "kind": "local",
+      "local_path": "tests/probes/run_standards.cmake",
+      "notes": "Local regression or direct support for language-mode cache, source-provider or literal fault-policy contracts.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-probes-standards-cmakelists-txt",
+      "kind": "local",
+      "local_path": "tests/probes/standards/CMakeLists.txt",
+      "notes": "Local regression or direct support for language-mode cache, source-provider or literal fault-policy contracts.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
       "id": "metis-local-tests-sanitizers-consumer-main-cpp",
       "kind": "local",
       "local_path": "tests/consumer/smoke.cpp",
       "notes": "Shared minimal installed-package, source-provider and sanitizer consumer fixture.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-sanitizers-fixture-positive-c",
+      "kind": "local",
+      "local_path": "tests/sanitizers/fixture_positive.c",
+      "notes": "Fork-local standalone sanitizer diagnostic control; no baseline upstream counterpart.",
+      "upstream_path": null
+    },
+    {
+      "baseline_blob": null,
+      "id": "metis-local-tests-sanitizers-fixture-positive-cmake",
+      "kind": "local",
+      "local_path": "tests/sanitizers/fixture_positive.cmake",
+      "notes": "Fork-local standalone sanitizer diagnostic control; no baseline upstream counterpart.",
       "upstream_path": null
     },
     {

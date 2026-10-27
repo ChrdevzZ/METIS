@@ -138,6 +138,7 @@ endif()
 include(CheckCCompilerFlag)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MetisIPO.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MetisCheckLink.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MetisSanitizers.cmake")
 
 
 function(metis_copy_runtime target)
@@ -244,69 +245,7 @@ function(metis_target_options target)
     target_link_options(${target} PUBLIC -pg)
   endif()
 
-  foreach(sanitizer IN LISTS METIS_SANITIZERS)
-    if(NOT sanitizer MATCHES "^(address|undefined)$")
-      message(FATAL_ERROR "Unsupported sanitizer: ${sanitizer}")
-    endif()
-    string(TOUPPER "${sanitizer}" sanitizer_id)
-    if(MSVC AND NOT CMAKE_C_COMPILER_ID MATCHES "Clang|IntelLLVM")
-      if(NOT sanitizer STREQUAL "address")
-        message(FATAL_ERROR "MSVC does not support ${sanitizer}")
-      endif()
-      set(sanitizer_flag /fsanitize=address)
-      # Static archives carry instrumented objects, so their final consumers
-      # also need the linker to infer the matching AddressSanitizer libraries.
-      set(sanitizer_link_flag "LINKER:/INFERASANLIBS")
-    else()
-      set(sanitizer_flag "-fsanitize=${sanitizer}")
-      set(sanitizer_link_flag "${sanitizer_flag}")
-    endif()
-    set(sanitizer_runtime "")
-    if(WIN32 AND CMAKE_C_SIMULATE_ID STREQUAL "MSVC" AND
-        CMAKE_C_COMPILER_ID MATCHES "Clang|IntelLLVM")
-      # These CMake toolchains may call link.exe/lld-link directly. Runtime
-      # libraries, not a compiler-only -fsanitize switch, form the link interface.
-      set(sanitizer_link_flag "")
-      if(sanitizer STREQUAL "address")
-        include("${PROJECT_SOURCE_DIR}/cmake/WindowsASan.cmake")
-        windows_asan_attach(${target} METIS metis_check_link)
-        set(sanitizer_runtime METIS::ASanRuntime)
-      endif()
-    endif()
-    cmake_push_check_state(RESET)
-    set(CMAKE_REQUIRED_FLAGS "${sanitizer_flag}")
-    set(CMAKE_REQUIRED_LINK_OPTIONS "${sanitizer_link_flag}")
-    set(CMAKE_REQUIRED_LIBRARIES "${sanitizer_runtime}")
-    # Check the instrumentation macro as well as real memory/arithmetic code.
-    # A compiler that merely warns and ignores the switch must not pass.
-    set(sanitizer_preamble "")
-    if(sanitizer STREQUAL "address")
-      set(sanitizer_preamble "#ifndef __has_feature\n#define __has_feature(x) 0\n#endif\n#if !defined(__SANITIZE_ADDRESS__) && !__has_feature(address_sanitizer)\n#error AddressSanitizer instrumentation is not enabled\n#endif\n")
-    elseif(CMAKE_C_COMPILER_ID MATCHES "Clang|IntelLLVM")
-      set(sanitizer_preamble "#ifndef __has_feature\n#define __has_feature(x) 0\n#endif\n#if !__has_feature(undefined_behavior_sanitizer)\n#error UndefinedBehaviorSanitizer instrumentation is not enabled\n#endif\n")
-    endif()
-    metis_check_link("${sanitizer_preamble}int main(int argc, char **argv) {
-      volatile int values[2] = {1, 2};
-      values[argc] = argc * argc;
-      return values[argc] + (argv[0] != 0);
-    }" METIS_${sanitizer_id}_LINKS)
-    cmake_pop_check_state()
-    if(NOT METIS_${sanitizer_id}_LINKS)
-      message(FATAL_ERROR "Requested sanitizer is unavailable: ${sanitizer}")
-    endif()
-    target_compile_options(${target} PRIVATE "${sanitizer_flag}")
-    if(sanitizer_link_flag)
-      # Native MSVC resolves the ASan imports when linking a DLL. Only static
-      # archives leave that work to their consumer's final linker.
-      get_target_property(sanitizer_target_type ${target} TYPE)
-      if(CMAKE_C_COMPILER_ID STREQUAL "MSVC" AND
-          NOT sanitizer_target_type STREQUAL "STATIC_LIBRARY")
-        target_link_options(${target} PRIVATE "${sanitizer_link_flag}")
-      else()
-        target_link_options(${target} PUBLIC "${sanitizer_link_flag}")
-      endif()
-    endif()
-  endforeach()
+  metis_target_sanitizers(${target})
 
   metis_target_ipo(${target})
 endfunction()

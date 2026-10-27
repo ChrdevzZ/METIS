@@ -242,7 +242,7 @@ endfunction()
 # run directly; cross targets use the configured emulator list or report an
 # explicit runtime skip after the normal build has already produced the target.
 function(metis_test_add_runtime)
-  cmake_parse_arguments(PARSE_ARGV 0 _test "EXPECT_FAILURE" "NAME;TARGET;WORKING_DIRECTORY" "ARGS")
+  cmake_parse_arguments(PARSE_ARGV 0 _test "EXPECT_FAILURE;REQUIRE_FAILURE_HIT" "NAME;TARGET;WORKING_DIRECTORY" "ARGS")
   if(NOT _test_NAME OR NOT _test_TARGET)
     message(FATAL_ERROR "metis_test_add_runtime requires NAME and TARGET")
   endif()
@@ -252,6 +252,7 @@ function(metis_test_add_runtime)
       "-DTEST_EXECUTABLE=$<TARGET_FILE:${_test_TARGET}>"
       "-DTEST_ARGUMENTS=${_test_ARGS}"
       "-DTEST_EXPECT_FAILURE=${_test_EXPECT_FAILURE}"
+      "-DTEST_REQUIRE_FAILURE_HIT=${_test_REQUIRE_FAILURE_HIT}"
       "-DTEST_WORKING_DIRECTORY=${_test_WORKING_DIRECTORY}"
       "-DTEST_CROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
       "-DTEST_EMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
@@ -282,6 +283,20 @@ if(DEFINED CMAKE_SCRIPT_MODE_FILE AND
   if(TEST_WORKING_DIRECTORY STREQUAL "")
     get_filename_component(TEST_WORKING_DIRECTORY "${TEST_EXECUTABLE}" DIRECTORY)
   endif()
+  # Each strict-exit process receives a fresh side channel. A silent failure
+  # before the armed production call must not satisfy the termination oracle.
+  if(TEST_REQUIRE_FAILURE_HIT)
+    if(NOT TEST_EXPECT_FAILURE)
+      message(FATAL_ERROR "Failure-hit evidence requires EXPECT_FAILURE")
+    endif()
+    string(RANDOM LENGTH 24 ALPHABET 0123456789abcdef _hit_id)
+    set(_hit_file "${TEST_WORKING_DIRECTORY}/failure-hit-${_hit_id}.txt")
+    while(EXISTS "${_hit_file}" OR IS_SYMLINK "${_hit_file}")
+      string(RANDOM LENGTH 24 ALPHABET 0123456789abcdef _hit_id)
+      set(_hit_file "${TEST_WORKING_DIRECTORY}/failure-hit-${_hit_id}.txt")
+    endwhile()
+    list(APPEND TEST_ARGUMENTS "${_hit_file}")
+  endif()
   set(_expected 0)
   if(TEST_EXPECT_FAILURE)
     execute_process(COMMAND ${_command} exit-status
@@ -300,6 +315,17 @@ if(DEFINED CMAKE_SCRIPT_MODE_FILE AND
     ERROR_VARIABLE _stderr
     ECHO_OUTPUT_VARIABLE
     ECHO_ERROR_VARIABLE)
+  if(TEST_REQUIRE_FAILURE_HIT)
+    if(NOT EXISTS "${_hit_file}" OR IS_SYMLINK "${_hit_file}")
+      message(FATAL_ERROR "Failure injection was not observed: ${_hit_file}")
+    endif()
+    file(READ "${_hit_file}" _hit LIMIT 64)
+    file(SIZE "${_hit_file}" _hit_size)
+    if(NOT _hit STREQUAL "INJECTION_HIT\n" OR NOT _hit_size EQUAL 14)
+      message(FATAL_ERROR "Invalid failure injection evidence: ${_hit_file}")
+    endif()
+    message(STATUS "Failure injection observed: ${_hit_file}")
+  endif()
   if(NOT "${_result}" STREQUAL "${_expected}" OR
       (TEST_EXPECT_FAILURE AND (NOT _stdout STREQUAL "" OR NOT _stderr STREQUAL "")))
     message(FATAL_ERROR

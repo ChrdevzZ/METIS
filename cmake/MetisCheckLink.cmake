@@ -6,6 +6,22 @@ include(CMakePushCheckState)
 
 
 function(metis_check_link source result)
+  cmake_parse_arguments(PARSE_ARGV 2 _metis_link_check "" "LANGUAGE" "")
+  if(_metis_link_check_UNPARSED_ARGUMENTS OR
+      _metis_link_check_KEYWORDS_MISSING_VALUES)
+    message(FATAL_ERROR "metis_check_link expects SOURCE RESULT [LANGUAGE C|CXX]")
+  endif()
+  set(_metis_link_check_language C)
+  if(_metis_link_check_LANGUAGE)
+    set(_metis_link_check_language "${_metis_link_check_LANGUAGE}")
+  endif()
+  if(NOT _metis_link_check_language MATCHES "^(C|CXX)$")
+    message(FATAL_ERROR "Unsupported metis_check_link language")
+  endif()
+  if(_metis_link_check_language STREQUAL "CXX")
+    include(CheckCXXSourceCompiles)
+  endif()
+
   cmake_push_check_state()
   set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
 
@@ -30,7 +46,7 @@ function(metis_check_link source result)
     # caller-defined configuration linker flags automatically. Pass both flag
     # families as platform inputs so the check matches the eventual link.
     list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
-      "CMAKE_C_FLAGS_${_metis_link_check_config_upper}"
+      "CMAKE_${_metis_link_check_language}_FLAGS_${_metis_link_check_config_upper}"
       "CMAKE_EXE_LINKER_FLAGS_${_metis_link_check_config_upper}")
     if(CMAKE_CONFIGURATION_TYPES)
       list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
@@ -43,31 +59,53 @@ function(metis_check_link source result)
   file(SHA256 "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
     _metis_link_check_implementation)
   set(_metis_link_check_signature
-    "implementation=[${_metis_link_check_implementation}]\nsource=[${source}]\nlanguage=[C]\n")
+    "implementation=[${_metis_link_check_implementation}]\nsource=[${source}]\nlanguage=[${_metis_link_check_language}]\n")
+
+  # Function policies are captured when the helper is defined, not when called.
+  # Keep language mode inputs distinct from an unset compiler default, including
+  # explicit OFF and empty values. The final link below uses this same scope.
+  foreach(_metis_link_check_policy IN ITEMS CMP0067 CMP0128)
+    cmake_policy(GET ${_metis_link_check_policy} _metis_link_check_policy_value)
+    string(APPEND _metis_link_check_signature
+      "helper-policy:${_metis_link_check_policy}=[${_metis_link_check_policy_value}]\n")
+  endforeach()
+  foreach(_metis_link_check_suffix IN ITEMS STANDARD STANDARD_REQUIRED EXTENSIONS
+      STANDARD_DEFAULT EXTENSIONS_DEFAULT)
+    set(_metis_link_check_name
+      "CMAKE_${_metis_link_check_language}_${_metis_link_check_suffix}")
+    if(DEFINED ${_metis_link_check_name})
+      string(APPEND _metis_link_check_signature
+        "${_metis_link_check_name}=defined:[${${_metis_link_check_name}}]\n")
+    else()
+      string(APPEND _metis_link_check_signature
+        "${_metis_link_check_name}=unset\n")
+    endif()
+  endforeach()
+
   foreach(_metis_link_check_name IN ITEMS
       CMAKE_COMMAND
       CMAKE_VERSION
       CMAKE_MAKE_PROGRAM
-      CMAKE_C_COMPILER
-      CMAKE_C_COMPILER_ARG1
-      CMAKE_C_COMPILER_ID
-      CMAKE_C_COMPILER_VERSION
-      CMAKE_C_COMPILER_FRONTEND_VARIANT
-      CMAKE_C_SIMULATE_ID
-      CMAKE_C_SIMULATE_VERSION
-      CMAKE_C_COMPILER_TARGET
-      CMAKE_C_COMPILER_ARCHITECTURE_ID
-      CMAKE_C_COMPILER_EXTERNAL_TOOLCHAIN
-      CMAKE_C_COMPILER_LAUNCHER
-      CMAKE_C_LINKER_LAUNCHER
-      CMAKE_C_COMPILER_LINKER
-      CMAKE_C_COMPILER_LINKER_ID
-      CMAKE_C_COMPILER_LINKER_VERSION
-      CMAKE_C_COMPILER_LINKER_FRONTEND_VARIANT
-      CMAKE_C_LINK_MODE
-      CMAKE_C_LINK_EXECUTABLE
-      CMAKE_C_LINKER_WRAPPER_FLAG
-      CMAKE_C_LINKER_WRAPPER_FLAG_SEP
+      CMAKE_${_metis_link_check_language}_COMPILER
+      CMAKE_${_metis_link_check_language}_COMPILER_ARG1
+      CMAKE_${_metis_link_check_language}_COMPILER_ID
+      CMAKE_${_metis_link_check_language}_COMPILER_VERSION
+      CMAKE_${_metis_link_check_language}_COMPILER_FRONTEND_VARIANT
+      CMAKE_${_metis_link_check_language}_SIMULATE_ID
+      CMAKE_${_metis_link_check_language}_SIMULATE_VERSION
+      CMAKE_${_metis_link_check_language}_COMPILER_TARGET
+      CMAKE_${_metis_link_check_language}_COMPILER_ARCHITECTURE_ID
+      CMAKE_${_metis_link_check_language}_COMPILER_EXTERNAL_TOOLCHAIN
+      CMAKE_${_metis_link_check_language}_COMPILER_LAUNCHER
+      CMAKE_${_metis_link_check_language}_LINKER_LAUNCHER
+      CMAKE_${_metis_link_check_language}_COMPILER_LINKER
+      CMAKE_${_metis_link_check_language}_COMPILER_LINKER_ID
+      CMAKE_${_metis_link_check_language}_COMPILER_LINKER_VERSION
+      CMAKE_${_metis_link_check_language}_COMPILER_LINKER_FRONTEND_VARIANT
+      CMAKE_${_metis_link_check_language}_LINK_MODE
+      CMAKE_${_metis_link_check_language}_LINK_EXECUTABLE
+      CMAKE_${_metis_link_check_language}_LINKER_WRAPPER_FLAG
+      CMAKE_${_metis_link_check_language}_LINKER_WRAPPER_FLAG_SEP
       CMAKE_LINKER
       CMAKE_LINKER_LINK
       CMAKE_LINKER_LLD
@@ -91,9 +129,9 @@ function(metis_check_link source result)
       CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
       CMAKE_MSVC_RUNTIME_LIBRARY
       CMAKE_LINKER_TYPE
-      CMAKE_C_LINKER_TYPE
-      CMAKE_C_STANDARD_LIBRARIES
-      CMAKE_C_FLAGS
+      CMAKE_${_metis_link_check_language}_LINKER_TYPE
+      CMAKE_${_metis_link_check_language}_STANDARD_LIBRARIES
+      CMAKE_${_metis_link_check_language}_FLAGS
       CMAKE_EXE_LINKER_FLAGS
       CMAKE_REQUIRED_FLAGS
       CMAKE_REQUIRED_DEFINITIONS
@@ -111,7 +149,7 @@ function(metis_check_link source result)
   get_cmake_property(_metis_link_check_variables VARIABLES)
   list(SORT _metis_link_check_variables)
   foreach(_metis_link_check_name IN LISTS _metis_link_check_variables)
-    if(_metis_link_check_name MATCHES "^CMAKE_C_USING_LINKER_")
+    if(_metis_link_check_name MATCHES "^CMAKE_${_metis_link_check_language}_USING_LINKER_")
       string(APPEND _metis_link_check_signature
         "${_metis_link_check_name}=[${${_metis_link_check_name}}]\n")
     endif()
@@ -119,7 +157,7 @@ function(metis_check_link source result)
 
   if(_metis_link_check_config)
     foreach(_metis_link_check_prefix IN ITEMS
-        CMAKE_C_FLAGS CMAKE_EXE_LINKER_FLAGS)
+        CMAKE_${_metis_link_check_language}_FLAGS CMAKE_EXE_LINKER_FLAGS)
       set(_metis_link_check_name
         "${_metis_link_check_prefix}_${_metis_link_check_config_upper}")
       string(APPEND _metis_link_check_signature
@@ -157,9 +195,69 @@ function(metis_check_link source result)
     FAIL_REGEX "option[^\n]*not supported"
     FAIL_REGEX "invalid argument [^\n]*option")
 
-  # Return the cached result without leaking the temporary check state.
-  check_c_source_compiles("${source}" ${_metis_link_check_variable}
-    ${_metis_link_check_fail_patterns})
+  # Check modules record the policies of their first inclusion. Run the private
+  # cache miss here so the signature and actual try_compile have one policy scope.
+  if(NOT DEFINED ${_metis_link_check_variable})
+    set(_metis_link_check_extension c)
+    if(_metis_link_check_language STREQUAL "CXX")
+      set(_metis_link_check_extension cxx)
+    endif()
+    set(_metis_link_check_work
+      "${CMAKE_BINARY_DIR}/CMakeFiles/metis-link-checks/${_metis_link_check_id}")
+    file(MAKE_DIRECTORY "${_metis_link_check_work}")
+    file(WRITE "${_metis_link_check_work}/source.${_metis_link_check_extension}"
+      "${source}\n")
+    set(_metis_link_check_options "")
+    if(CMAKE_REQUIRED_LINK_OPTIONS)
+      list(APPEND _metis_link_check_options
+        LINK_OPTIONS ${CMAKE_REQUIRED_LINK_OPTIONS})
+    endif()
+    if(CMAKE_REQUIRED_LIBRARIES)
+      list(APPEND _metis_link_check_options
+        LINK_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES})
+    endif()
+    set(_metis_link_check_directories "")
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.31 AND CMAKE_REQUIRED_LINK_DIRECTORIES)
+      set(_metis_link_check_directories
+        "-DLINK_DIRECTORIES:STRING=${CMAKE_REQUIRED_LINK_DIRECTORIES}")
+    endif()
+    if(NOT CMAKE_REQUIRED_QUIET)
+      message(CHECK_START "Performing Test ${_metis_link_check_variable}")
+    endif()
+    try_compile(${_metis_link_check_variable} "${_metis_link_check_work}/build"
+      SOURCES "${_metis_link_check_work}/source.${_metis_link_check_extension}"
+      COMPILE_DEFINITIONS -D${_metis_link_check_variable} ${CMAKE_REQUIRED_DEFINITIONS}
+      ${_metis_link_check_options}
+      CMAKE_FLAGS "-DCOMPILE_DEFINITIONS:STRING=${CMAKE_REQUIRED_FLAGS}"
+        "-DINCLUDE_DIRECTORIES:STRING=${CMAKE_REQUIRED_INCLUDES}"
+        "${_metis_link_check_directories}"
+      OUTPUT_VARIABLE _metis_link_check_output)
+    foreach(_metis_link_check_pattern IN LISTS _metis_link_check_fail_patterns)
+      if(NOT _metis_link_check_pattern STREQUAL "FAIL_REGEX" AND
+          "${_metis_link_check_output}" MATCHES "${_metis_link_check_pattern}")
+        set(${_metis_link_check_variable} FALSE)
+      endif()
+    endforeach()
+    if(${_metis_link_check_variable})
+      set(_metis_link_check_result 1)
+      set(_metis_link_check_log CMakeOutput.log)
+      if(NOT CMAKE_REQUIRED_QUIET)
+        message(CHECK_PASS "Success")
+      endif()
+    else()
+      set(_metis_link_check_result "")
+      set(_metis_link_check_log CMakeError.log)
+      if(NOT CMAKE_REQUIRED_QUIET)
+        message(CHECK_FAIL "Failed")
+      endif()
+    endif()
+    file(WRITE "${_metis_link_check_work}/output.log" "${_metis_link_check_output}")
+    file(APPEND "${CMAKE_BINARY_DIR}/CMakeFiles/${_metis_link_check_log}"
+      "Link check ${_metis_link_check_variable}:\n${_metis_link_check_output}\nSource:\n${source}\n")
+    set(${_metis_link_check_variable} "${_metis_link_check_result}"
+      CACHE INTERNAL "Test ${_metis_link_check_variable}" FORCE)
+    set(${_metis_link_check_variable} "${_metis_link_check_result}")
+  endif()
   set(${result} "${${_metis_link_check_variable}}" PARENT_SCOPE)
   cmake_pop_check_state()
 endfunction()

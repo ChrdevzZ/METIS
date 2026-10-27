@@ -35,7 +35,7 @@ endif()
 if(NOT gklib_source AND METIS_FETCH_GKLIB)
   include(FetchContent)
   # Keep this pin equal to the gitlink; publish GKlib before publishing METIS.
-  set(METIS_GKLIB_REVISION 33253c024713aa66ae14b8094c39e5743cd15f58)
+  set(METIS_GKLIB_REVISION 23b88cb38759799d47e7d217d969e48dbe759c70)
   FetchContent_Declare(gklib
     GIT_REPOSITORY https://github.com/ChrdevzZ/GKlib.git
     GIT_TAG ${METIS_GKLIB_REVISION}
