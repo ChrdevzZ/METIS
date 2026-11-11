@@ -97,6 +97,10 @@ separately from an unrepresentable or unavailable allocation. Checked `size_t`
 calculations are performed where derived storage is needed; legal CSR input is
 not rejected by a blanket half-range limit.
 
+The shared graph constructor fix stops total-weight allocation at the first
+reported failure. Recovery preserves the first error and the existing graph
+arrays.
+
 Workspace frames are checked before their payloads are used. A failed marker
 push leaves the previous frame intact, and a pop without a marker does not
 release the preceding frame. Mesh partitioning checks node-element and row

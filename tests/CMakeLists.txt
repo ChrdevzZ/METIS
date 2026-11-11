@@ -147,6 +147,9 @@ elseif(_metis_test_link_wrap)
   endif()
   add_executable(metis_constructor_failure constructor_failure.c
     "${PROJECT_SOURCE_DIR}/apps/io.c")
+  metis_test_add_runtime(NAME metis.vol-setup-failure
+    TARGET metis_constructor_failure ARGS vol-setup)
+  set_tests_properties(metis.vol-setup-failure PROPERTIES TIMEOUT 30)
   target_include_directories(metis_constructor_failure PRIVATE
     "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/apps")
   target_link_libraries(metis_constructor_failure PRIVATE METIS::metis

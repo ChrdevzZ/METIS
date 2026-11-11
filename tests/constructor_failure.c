@@ -35,6 +35,10 @@ static size_t heap_workspace_hits, heap_pop_clobbers;
 static int query_ncon=1, query_edge_separator, query_minconn;
 static int release_failure;
 static const char *release_hit_path;
+static int record_vol_setup;
+static size_t vol_setup_count, vol_setup_bytes[32];
+static const char *vol_setup_labels[32];
+static int tvwgt_fail_sigerr;
 #ifdef METIS_TEST_POSIX_QUERY
 static int SameQueryMask(const sigset_t *left, const sigset_t *right);
 int __real_pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset);
@@ -197,6 +201,10 @@ void *__wrap_gk_malloc(size_t nbytes, const char *msg)
 {
   void *ptr;
 
+  if (record_vol_setup && vol_setup_count < 32) {
+    vol_setup_bytes[vol_setup_count] = nbytes;
+    vol_setup_labels[vol_setup_count++] = msg;
+  }
   if (initialization_failed)
     allocations_after_failure++;
   if (!fail_nosignal) {
@@ -205,13 +213,16 @@ void *__wrap_gk_malloc(size_t nbytes, const char *msg)
         (fail_message != NULL && strcmp(msg, fail_message) == 0) ||
         (fail_recursive_allocation && in_recursive &&
          strcmp(msg, "SetupCtrl: ctrl") == 0)) {
+      int error = tvwgt_fail_sigerr ? EIO : ENOMEM;
+      int signum = tvwgt_fail_sigerr ? SIGERR : SIGMEM;
+
       if (fail_message != NULL && strcmp(msg, fail_message) == 0)
         message_hits++;
       if (clobber_cleanup || strcmp(msg, "InitKWayPartitioning: ubvec") == 0)
         initialization_failed = 1;
-      errno = ENOMEM;
-      gk_errexit(SIGMEM, "Injected reported allocation failure");
-      errno = ENOMEM;
+      errno = error;
+      gk_errexit(signum, "Injected reported allocation failure");
+      errno = error;
       return NULL;
     }
   }
@@ -2753,10 +2764,254 @@ static int CheckReleaseFailure(int mode, const char *hit_path)
 }
 
 
+/*************************************************************************/
+/*! Checks ownership and recovery when one or both total-weight arrays are
+    missing. A second allocation failure exercises cleanup of the first. */
+/*************************************************************************/
+static int CheckTotalWeightCase(int have_total, int have_inverse, int mode,
+    size_t fail, int signum)
+{
+  graph_t graph;
+  idx_t weights[] = {1, 2, 3, 6}, totals[] = {-17, -19};
+  real_t inverse[] = {-2.0, -3.0};
+  idx_t *old_total = have_total ? totals : NULL;
+  real_t *old_inverse = have_inverse ? inverse : NULL;
+  size_t needed = (size_t)(2-have_total-have_inverse);
+  size_t baseline = gk_GetCurMemoryUsed(), memory_after, observed;
+  int jbuf_before = gk_cur_jbufs, jbuf_after;
+  int status, saved_errno, owners_preserved, values_preserved, passed;
+
+  InitGraph(&graph);
+  graph.nvtxs = graph.ncon = 2;
+  graph.vwgt = weights;
+  graph.tvwgt = old_total;
+  graph.invtvwgt = old_inverse;
+  gk_set_exit_on_error(mode);
+
+  if (fail != 0) {
+    const char *expected_label = have_total || fail == 2 ?
+        "SetupGraph_tvwgt: invtvwgt" : "SetupGraph_tvwgt: tvwgt";
+    const char *label;
+    int expected_status = signum == SIGERR ? METIS_ERROR : METIS_ERROR_MEMORY;
+    int expected_errno = signum == SIGERR ? EIO : ENOMEM;
+
+    FailAllocation(fail, 0);
+    clobber_cleanup = 1;
+    cleanup_clobbers = 0;
+    initialization_failed = 0;
+    tvwgt_fail_sigerr = signum == SIGERR;
+    vol_setup_count = 0;
+    record_vol_setup = 1;
+    errno = EDOM;
+    status = SetupGraph_tvwgt(&graph);
+    saved_errno = errno;
+    record_vol_setup = 0;
+    AllowAllocations();
+    tvwgt_fail_sigerr = clobber_cleanup = initialization_failed = 0;
+    label = vol_setup_count >= fail ? vol_setup_labels[fail-1] : "<not observed>";
+    observed = allocation_count;
+    memory_after = gk_GetCurMemoryUsed();
+    jbuf_after = gk_cur_jbufs;
+    owners_preserved = graph.tvwgt == old_total && graph.invtvwgt == old_inverse;
+    values_preserved = totals[0] == -17 && totals[1] == -19 &&
+        inverse[0] == -2.0 && inverse[1] == -3.0;
+    passed = status == expected_status && saved_errno == expected_errno &&
+        observed == fail && strcmp(label, expected_label) == 0 &&
+        owners_preserved && values_preserved && memory_after == baseline &&
+        jbuf_after == jbuf_before && cleanup_clobbers == fail-1;
+    printf("TVWGT_FAIL have_total=%d have_inverse=%d mode=%d signal=%s"
+        " sequence=%zu label=\"%s\" status=%d expected_status=%d"
+        " errno=%d expected_errno=%d allocation_count=%zu"
+        " owners_preserved=%d values_preserved=%d cleanup_frees=%zu"
+        " expected_cleanup_frees=%zu memory_before=%zu memory_after=%zu"
+        " jbuf_before=%d jbuf_after=%d pass=%d\n",
+        have_total, have_inverse, mode, signum == SIGERR ? "SIGERR" : "SIGMEM",
+        fail, label, status, expected_status, saved_errno, expected_errno, observed,
+        owners_preserved, values_preserved, cleanup_clobbers, fail-1,
+        baseline, memory_after, jbuf_before, jbuf_after, passed);
+    fflush(stdout);
+    errno = saved_errno;
+    if (!passed) return 214;
+  }
+
+  FailAllocation(SIZE_MAX, 0);
+  status = SetupGraph_tvwgt(&graph);
+  saved_errno = errno;
+  AllowAllocations();
+  observed = allocation_count;
+  jbuf_after = gk_cur_jbufs;
+  passed = status == METIS_OK && observed == needed && jbuf_after == jbuf_before &&
+      graph.tvwgt != NULL && graph.invtvwgt != NULL &&
+      (!have_total || graph.tvwgt == old_total) &&
+      (!have_inverse || graph.invtvwgt == old_inverse) &&
+      graph.tvwgt[0] == 4 && graph.tvwgt[1] == 8 &&
+      graph.invtvwgt[0] == 0.25 && graph.invtvwgt[1] == 0.125;
+  printf("TVWGT_HEALTHY have_total=%d have_inverse=%d mode=%d after_sequence=%zu"
+      " status=%d allocation_count=%zu expected_count=%zu"
+      " jbuf_before=%d jbuf_after=%d pass=%d\n",
+      have_total, have_inverse, mode, fail, status, observed, needed,
+      jbuf_before, jbuf_after, passed);
+  fflush(stdout);
+  errno = saved_errno;
+  if (!passed) return 215;
+  if (!have_total) gk_free((void **)&graph.tvwgt, LTERM);
+  if (!have_inverse) gk_free((void **)&graph.invtvwgt, LTERM);
+  return gk_GetCurMemoryUsed() == baseline ? 0 : 216;
+}
+
+
+/*************************************************************************/
+/*! Keeps the total-weight contract checks within the existing VOL fixture. */
+/*************************************************************************/
+static int CheckTotalWeightFailures(void)
+{
+  int have_total, have_inverse, mode, status;
+  size_t fail;
+
+  if (!gk_malloc_init()) return 213;
+  for (have_total=0; have_total<2; have_total++)
+    for (have_inverse=0; have_inverse<2; have_inverse++)
+      for (mode=0; mode<2; mode++)
+        for (fail=0; fail<=(size_t)(2-have_total-have_inverse); fail++) {
+          status = CheckTotalWeightCase(have_total, have_inverse, mode, fail, SIGMEM);
+          if (status != 0) return status;
+        }
+  status = CheckTotalWeightCase(0, 0, 1, 2, SIGERR);
+  if (status != 0) return status;
+  gk_malloc_cleanup(0);
+  gk_set_exit_on_error(1);
+  return 0;
+}
+
+
+/*************************************************************************/
+/*! Calibrates only Kway/VOL SetupGraph, then checks its real allocation sites.
+    Requires the existing link-wrap capability gate; no allocator simulation. */
+/*************************************************************************/
+static int CheckVolSetupFailures(void)
+{
+  idx_t x[] = {0, 2, 4, 6, 8}, a[] = {1, 3, 0, 2, 1, 3, 2, 0};
+  idx_t ones[] = {1, 1, 1, 1}, options[METIS_NOPTIONS];
+  idx_t bx[5], ba[8], part[4], n, nc, np, obj;
+  ctrl_t *ctrl=NULL;
+  graph_t *graph=NULL;
+  graph_t *const sentinel = (graph_t *)(uintptr_t)1;
+  size_t mode, explicit_size, fail, count, baseline, i;
+  int status, saved_errno;
+
+  METIS_SetDefaultOptions(options);
+  options[METIS_OPTION_OBJTYPE] = METIS_OBJTYPE_VOL;
+  options[METIS_OPTION_SEED] = 12345;
+  for (explicit_size=0; explicit_size<2; explicit_size++) {
+    if (!gk_malloc_init() || SetupCtrl(METIS_OP_KMETIS, options, 1, 2,
+        NULL, NULL, &ctrl) != METIS_OK) return 201;
+    baseline = gk_GetCurMemoryUsed();
+    vol_setup_count = 0;
+    record_vol_setup = 1;
+    AllowAllocations();
+    status = SetupGraph(ctrl, 4, 1, x, a, NULL,
+        explicit_size ? ones : NULL, NULL, &graph);
+    record_vol_setup = 0;
+    count = vol_setup_count;
+    if (status != METIS_OK || graph == NULL || count == 0 || count >= 32)
+      return 202;
+    for (i=0; i<count; i++)
+      printf("VOL_SETUP mode=%s sequence=%zu label=%s bytes=%zu count=%zu\n",
+          explicit_size ? "ones" : "NULL", i+1, vol_setup_labels[i],
+          vol_setup_bytes[i], count);
+    FreeGraph(&graph);
+    if (gk_GetCurMemoryUsed() != baseline) return 203;
+    for (mode=0; mode<2; mode++) {
+      gk_set_exit_on_error((int)mode);
+      for (fail=1; fail<=count; fail++) {
+        size_t memory_before = gk_GetCurMemoryUsed(), memory_after, observed;
+        int jbuf_before = gk_cur_jbufs, jbuf_after, passed;
+        const char *label, *next_label, *owner;
+
+        FailAllocation(fail, 0);
+        vol_setup_count = 0;
+        record_vol_setup = 1;
+        graph = sentinel;
+        errno = EDOM;
+        status = SetupGraph(ctrl, 4, 1, x, a, NULL,
+            explicit_size ? ones : NULL, NULL, &graph);
+        saved_errno = errno;
+        record_vol_setup = 0;
+        AllowAllocations();
+        observed = allocation_count;
+        memory_after = gk_GetCurMemoryUsed();
+        jbuf_after = gk_cur_jbufs;
+        label = vol_setup_count >= fail ? vol_setup_labels[fail-1] : "<not observed>";
+        next_label = vol_setup_count > fail ? vol_setup_labels[fail] : "<none>";
+        owner = graph == NULL ? "NULL" : graph == sentinel ? "SENTINEL" : "PUBLISHED";
+        passed = status == METIS_ERROR_MEMORY && graph == NULL &&
+            saved_errno == ENOMEM && observed == fail &&
+            memory_after == baseline && jbuf_after == -1;
+        printf("VOL_FAIL mode=%zu size=%zu sequence=%zu status=%d errno=%d\n",
+            mode, explicit_size, fail, status, saved_errno);
+        printf("VOL_FAIL_DETAIL mode=%s vsize=%s sequence=%zu label=\"%s\""
+            " next_label=\"%s\" status=%d expected_status=%d errno=%d expected_errno=%d"
+            " graph_null=%d graph_owner=%s ctrl_present=%d allocation_count=%zu"
+            " expected_count=%zu baseline=%zu memory_before=%zu memory_after=%zu"
+            " jbuf_before=%d jbuf_after=%d expected_jbuf=-1 pass204=%d\n",
+            mode ? "synchronous" : "reported-return", explicit_size ? "ones" : "NULL",
+            fail, label, next_label, status, METIS_ERROR_MEMORY, saved_errno, ENOMEM,
+            graph == NULL, owner, ctrl != NULL, observed, fail, baseline,
+            memory_before, memory_after, jbuf_before, jbuf_after, passed);
+        fflush(stdout);
+        errno = saved_errno;
+        if (!passed) return 204;
+        if (x[0] != 0 || x[1] != 2 || x[2] != 4 || x[3] != 6 ||
+            x[4] != 8 || a[0] != 1 || a[1] != 3 || a[2] != 0 ||
+            a[3] != 2 || a[4] != 1 || a[5] != 3 || a[6] != 2 ||
+            a[7] != 0 || ones[0] != 1 || ones[1] != 1 ||
+            ones[2] != 1 || ones[3] != 1) return 212;
+        status = SetupGraph(ctrl, 4, 1, x, a, NULL,
+            explicit_size ? ones : NULL, NULL, &graph);
+        if (status != METIS_OK || graph == NULL) return 205;
+        FreeGraph(&graph);
+        if (gk_GetCurMemoryUsed() != baseline) return 206;
+      }
+    }
+    FreeCtrl(&ctrl);
+    if (gk_GetCurMemoryUsed() != 0) return 207;
+    gk_malloc_cleanup(0);
+  }
+
+  /* Only two representative public constructor failures, with base-one input.
+     No transactional output assertion is added for internal algorithm errors. */
+  options[METIS_OPTION_NUMBERING] = 1;
+  for (mode=0; mode<2; mode++) for (i=0; i<2; i++) {
+    gk_set_exit_on_error((int)mode);
+    for (fail=0; fail<5; fail++) bx[fail] = x[fail]+1;
+    for (fail=0; fail<8; fail++) ba[fail] = a[fail]+1;
+    n=4; nc=1; np=2; obj=-17;
+    FailMessage(i == 0 ? "SetupGraph: vsize" : "SetupGraph: adjwgt");
+    errno = EDOM;
+    status = METIS_PartGraphKway(&n, &nc, bx, ba, NULL, NULL, NULL,
+        &np, NULL, NULL, options, &obj, part);
+    saved_errno = errno;
+    AllowAllocations();
+    if (status != METIS_ERROR_MEMORY || saved_errno != ENOMEM ||
+        message_hits != 1 || gk_cur_jbufs != -1 ||
+        gk_GetCurMemoryUsed() != 0) return 208;
+    for (fail=0; fail<5; fail++) if (bx[fail] != x[fail]+1) return 209;
+    for (fail=0; fail<8; fail++) if (ba[fail] != a[fail]+1) return 210;
+    status = METIS_PartGraphKway(&n, &nc, bx, ba, NULL, NULL, NULL,
+        &np, NULL, NULL, options, &obj, part);
+    if (status != METIS_OK || gk_GetCurMemoryUsed() != 0 ||
+        gk_cur_jbufs != -1) return 211;
+  }
+  return CheckTotalWeightFailures();
+}
+
+
 int main(int argc, char *argv[])
 {
   int status;
 
+  if (argc == 2 && strcmp(argv[1], "vol-setup") == 0)
+    return CheckVolSetupFailures();
   if (argc == 2 && strcmp(argv[1], "exit-status") == 0)
     return EXIT_FAILURE;
   if (argc == 2 && strcmp(argv[1], "cli-frame-failure") == 0)

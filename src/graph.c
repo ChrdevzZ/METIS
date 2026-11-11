@@ -221,7 +221,9 @@ int SetupGraph_tvwgt(graph_t *graph)
     if (sigrval == 0) {
       if (graph->tvwgt == NULL)
         new_tvwgt = imalloc(graph->ncon, "SetupGraph_tvwgt: tvwgt");
-      if (graph->invtvwgt == NULL)
+      /* A reported allocation failure can return without a signal. */
+      if (graph->invtvwgt == NULL &&
+          (graph->tvwgt != NULL || new_tvwgt != NULL))
         new_invtvwgt = rmalloc(graph->ncon,
             "SetupGraph_tvwgt: invtvwgt");
     }

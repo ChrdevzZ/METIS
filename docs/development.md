@@ -1,5 +1,11 @@
 # Development checks
 
+`metis.vol-setup-failure` uses verified link wrapping to calibrate K-way VOL
+graph construction and check allocation failures in both error modes. It also
+calls total-weight setup directly to check allocation order, release of temporary
+allocations, and preservation of existing arrays. Run the fixture on Linux when
+the Windows toolchain lacks verified wrapping.
+
 For current build instructions see [building](building.md). For the fixed
 upstream source, compatibility changes and Unreleased history see
 [fork changes](../FORK_CHANGES.md).
